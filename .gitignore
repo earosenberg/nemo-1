@@ -1,0 +1,4 @@
+build
+__pycache__
+*.egg*
+nemo/nemoCython.c
