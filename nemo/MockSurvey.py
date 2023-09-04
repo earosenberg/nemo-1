@@ -123,7 +123,11 @@ class MockSurvey(object):
         self._get_new_cosmo(H0, Om0, Ob0, sigma8, ns)
 
         # NOTE: These are just MSun now (NOT MSun/h); always defined according to mdef
-        self.log10M=np.arange(np.log10(minMass), 16, 0.01)
+        # BB: here we set a small mass step
+        # original:
+        # self.log10M=np.arange(np.log10(minMass), 16, 0.01)
+        # new:
+        self.log10M=np.arange(np.log10(minMass), 16, 0.001)
         self.M=np.power(10, self.log10M)
         self.log10MBinEdges=np.linspace(self.log10M.min()-(self.log10M[1]-self.log10M[0])/2, 
                                         self.log10M.max()+(self.log10M[1]-self.log10M[0])/2, len(self.log10M)+1)  
@@ -202,12 +206,18 @@ class MockSurvey(object):
         for k in range(len(self.z)):
             # NOTE: Q fit uses theta500, as does fRel (hardcoded M500 - T relation in there)
             # This bit here may not be strictly necessary, since we don't need to map on to binning
-            if self.delta == 500 and self.rhoType == "critical":
-                interpLim_minLog10M500c=self.log10M.min()
-                interpLim_maxLog10M500c=self.log10M.max()
-            else:
-                interpLim_minLog10M500c=np.log10(self._transToM500c(self.cosmoModel, self.M.min(), self.a[k]))
-                interpLim_maxLog10M500c=np.log10(self._transToM500c(self.cosmoModel, self.M.max(), self.a[k]))
+            ## BB bypass this that is buggy:
+            # original:
+            #if self.delta == 500 and self.rhoType == "critical":
+            #    interpLim_minLog10M500c=self.log10M.min()
+            #    interpLim_maxLog10M500c=self.log10M.max()
+            #else:
+            #    interpLim_minLog10M500c=np.log10(self._transToM500c(self.cosmoModel, self.M.min(), self.a[k]))
+            #    interpLim_maxLog10M500c=np.log10(self._transToM500c(self.cosmoModel, self.M.max(), self.a[k]))
+            # new:
+            interpLim_minLog10M500c=self.log10M.min()
+            interpLim_maxLog10M500c=self.log10M.max()
+            
             zk=self.z[k]
             interpPoints=100
             fitM500s=np.power(10, np.linspace(interpLim_minLog10M500c, interpLim_maxLog10M500c, interpPoints))
@@ -280,6 +290,9 @@ class MockSurvey(object):
         h = self.cosmoModel['h']
         self.M=np.power(10, self.log10M) # in M_sun
         norm_mfunc=1. / np.log(10)
+        
+        #BB
+        print('fsky:',(self.areaSr/(4*np.pi)))
 
         # Number density by z and total cluster count (in redshift shells)
         # Can use to make P(m, z) plane
@@ -291,13 +304,38 @@ class MockSurvey(object):
             zShellMax=zRange[i+1]
             zShellMid=(zShellMax+zShellMin)/2.
             dndlnM=self.mfunc(self.cosmoModel, self.M, 1./(1+zShellMid)) * norm_mfunc
+            # BB small hack to integrate the hmf more finely:
+            # original:
+            # dndM = dndlnM / self.M
+            # n=dndM * np.gradient(self.M)
+            # numberDensity.append(n)
+            # shellVolumeMpc3=self._comovingVolume(zShellMax)-self._comovingVolume(zShellMin)
+            # shellVolumeMpc3=shellVolumeMpc3*(self.areaSr/(4*np.pi))
+            # totalVolumeMpc3+=shellVolumeMpc3
+            # clusterCount.append(n*shellVolumeMpc3)
+            # new: 
+            nzfine = 10
+            zfine = np.linspace(zShellMin,zShellMax,nzfine)
+            dNdlnM = np.zeros((nzfine,len(self.M)))
+            dVfine =  np.zeros(nzfine)
+            for (izz,zzfine) in enumerate(zfine):
+                dndlnMzfine = self.mfunc(self.cosmoModel, self.M,
+                                                    1./(1.+zzfine))* norm_mfunc
+                
+                Ezfine=ccl.h_over_h0(self.cosmoModel,1./(1.+zzfine))
+                DAzfine=ccl.angular_diameter_distance(self.cosmoModel,1./(1.+zzfine))
+                dNdlnM[izz,:] = 4.*np.pi*(self.areaSr/(4*np.pi))*dndlnMzfine*(1.+zzfine)**2*DAzfine**2/Ezfine*2.99792458e8/1e5/(self.H0/100.)
+                dVfine[izz] = 4.*np.pi*(self.areaSr/(4*np.pi))*(1.+zzfine)**2*DAzfine**2/Ezfine*2.99792458e8/1e5/(self.H0/100.)
+            dNdlnM = np.trapz(dNdlnM,x=zfine,axis=0)
+            shellvolumefine = np.trapz(dVfine,x=zfine)
+            nfine = dNdlnM/self.M*np.gradient(self.M)
             dndM = dndlnM / self.M
             n=dndM * np.gradient(self.M)
-            numberDensity.append(n)
+            numberDensity.append(nfine/shellvolumefine)
             shellVolumeMpc3=self._comovingVolume(zShellMax)-self._comovingVolume(zShellMin)
             shellVolumeMpc3=shellVolumeMpc3*(self.areaSr/(4*np.pi))
-            totalVolumeMpc3+=shellVolumeMpc3
-            clusterCount.append(n*shellVolumeMpc3)
+            totalVolumeMpc3+=shellvolumefine
+            clusterCount.append(nfine)          
         numberDensity=np.array(numberDensity)
         clusterCount=np.array(clusterCount)
         self.volumeMpc3=totalVolumeMpc3
@@ -548,10 +586,14 @@ class MockSurvey(object):
             
             # We generalised mass definitions, but still need M500c, theta500c for Q, fRel calc
             # So... we may as well convert and add that to output (below) as well
-            if self.delta == 500 and self.rhoType == "critical":
-                log10M500cs[mask]=log10Ms[mask]
-            else:
-                log10M500cs[mask]=np.log10(self._transToM500c(self.cosmoModel, np.power(10, log10Ms[mask]), 1/(1+zk)))
+            # BB comment this:
+            # if self.delta == 500 and self.rhoType == "critical":
+            #     log10M500cs[mask]=log10Ms[mask]
+            # else:
+            #     log10M500cs[mask]=np.log10(self._transToM500c(self.cosmoModel, np.power(10, log10Ms[mask]), 1/(1+zk)))
+            # BB instead dont use mass conversion:
+            log10M500cs[mask]=log10Ms[mask] # added line.
+            
             theta500s=interpolate.splev(log10M500cs[mask], self.theta500Splines[k], ext = 3)
             if QFit is not None:
                 Qs[mask]=QFit.getQ(theta500s, z = zk, tileName = tileName)
@@ -575,7 +617,11 @@ class MockSurvey(object):
             raise Exception("Negative y0 values (probably spline related) for H0 = %.6f Om0 = %.6f sigma8 = %.6f at z = %.3f" % (self.H0, self.Om0, self.sigma8, zk))
         if applyRelativisticCorrection == True:
             true_y0s=true_y0s*fRels
-
+        # BB: hack this to match class_sz/standard definitions:
+        M200c = np.power(10, log10Ms)
+        true_y0s=tenToA0*np.power(ccl.h_over_h0(self.cosmoModel, 1/(1+zs)), 2)*np.power(M200c/Mpivot, 1+B0)*np.power(M200c/Mpivot*self.cosmoModel['h']/0.7, 0.12)*(self.cosmoModel['h']/0.7)**2.*(self.cosmoModel['h']/0.7)**-1.5
+            
+            
         # Add noise and intrinsic scatter everywhere
         if applyIntrinsicScatter == True:
             scattered_y0s=np.exp(np.random.normal(np.log(true_y0s), sigma_int, len(true_y0s)))

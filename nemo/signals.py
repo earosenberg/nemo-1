@@ -414,7 +414,8 @@ def calcR500Mpc(z, M500c, cosmoModel):
     """
     
     R500Mpc=calcRDeltaMpc(z, M500c, cosmoModel, delta = 500, wrt = 'critical')
-    
+    ## BB do everything at 200c
+    R500Mpc=calcRDeltaMpc(z, M500c, cosmoModel, delta = 200, wrt = 'critical')    
     return R500Mpc
 
 #------------------------------------------------------------------------------------------------------------
@@ -635,6 +636,9 @@ def _paintSignalMap(shape, wcs, tckP, beam = None, RADeg = None, decDeg = None, 
             beam=BeamProfile(beamFileName = beam)
         rht=utils.RadialFourierTransform()
         rprof=interpolate.splev(np.degrees(rht.r), tckP, ext = 1)
+        if amplitude is not None: # BB
+            rprof=rprof*amplitude # BB
+            amp=1.0 # BB
         lbeam=np.interp(rht.l, beam.ell, beam.Bell)
         lprof=rht.real2harm(rprof)
         lprof*=lbeam
@@ -644,9 +648,12 @@ def _paintSignalMap(shape, wcs, tckP, beam = None, RADeg = None, decDeg = None, 
         rDeg=np.logspace(np.log10(1e-6), np.log10(maxSizeDeg), 5000)
         rprof=interpolate.splev(rDeg, tckP, ext = 1)
         r=np.radians(rDeg)
-    if amplitude is not None:
-        amp=rprof[0]*amplitude
-        rprof=rprof/rprof[0]
+        if amplitude is not None: # BB added
+            amp=amplitude # BB added
+    # BB commented 3 lines below
+    #if amplitude is not None:
+    #    amp=rprof[0]*amplitude
+    #    rprof=rprof/rprof[0]
 
     if type(RADeg) == np.ndarray and type(decDeg) == np.ndarray:
         poss=np.array([np.radians(decDeg), np.radians(RADeg)]).astype(dtype)

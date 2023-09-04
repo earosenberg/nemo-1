@@ -680,7 +680,9 @@ def convertToDeltaT(mapData, obsFrequencyGHz = 148, TCMBAlpha = 0.0, z = None):
     """
     fx=signals.fSZ(obsFrequencyGHz, TCMBAlpha = TCMBAlpha, z = z)
     mapData=mapData*fx*(signals.TCMB*1e6)   # into uK
-    
+    #mapData=mapData*-5.3487e6   # BB into uK from websky at 278. (see our overleaf.) 
+    #BB: freq: 27, 39, 93, 145, 225, 278 GHz
+    #BB: conv: -5.3487e6, -5.2384e6, -4.2840e6, -2.7685e6, 3.1517e5, 2.7314e6    
     return mapData
 
 #-------------------------------------------------------------------------------------------------------------
@@ -1839,9 +1841,10 @@ def makeModelImage(shape, wcs, catalog, beamFileName, obsFreqGHz = None, GNFWPar
                                           GNFWParams = GNFWParams, amplitude = y0ToInsert,
                                           maxSizeDeg = maxSizeDeg, convolveWithBeam = True,
                                           cosmoModel = cosmoModel)
-            if obsFreqGHz is not None:
-                modelMap=convertToDeltaT(modelMap, obsFrequencyGHz = obsFreqGHz,
-                                         TCMBAlpha = TCMBAlpha, z = z)
+            ## BB coment 2 lines below: we want sz map only.
+            #if obsFreqGHz is not None:
+            #    modelMap=convertToDeltaT(modelMap, obsFrequencyGHz = obsFreqGHz,
+            #                             TCMBAlpha = TCMBAlpha, z = z)
         else:
             for row in catalog:
                 count=count+1
@@ -1868,9 +1871,10 @@ def makeModelImage(shape, wcs, catalog, beamFileName, obsFreqGHz = None, GNFWPar
                                                 GNFWParams = GNFWParams, amplitude = y0ToInsert,
                                                 maxSizeDeg = maxSizeDeg, convolveWithBeam = True,
                                                 cosmoModel = cosmoModel)
-                if obsFreqGHz is not None:
-                    signalMap=convertToDeltaT(signalMap, obsFrequencyGHz = obsFreqGHz,
-                                                TCMBAlpha = TCMBAlpha, z = z)
+                ## BB coment 2 lines below: we want sz map only.
+                #if obsFreqGHz is not None:
+                #    signalMap=convertToDeltaT(signalMap, obsFrequencyGHz = obsFreqGHz,
+                #                                TCMBAlpha = TCMBAlpha, z = z)
                 modelMap=modelMap+signalMap
     else:
         # Sources - slower but more accurate way
