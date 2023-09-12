@@ -6,7 +6,13 @@ This module contains routines for modeling cluster and source signals.
 
 import os
 import sys
-from pixell import enmap, curvedsky, utils, pointsrcs
+#from pixell import enmap, curvedsky, utils, pointsrcs
+#from pixell import
+enmap = None
+curvedsky = None
+utils = None
+powspec = None
+pointsrcs = None
 import astropy
 import astropy.wcs as enwcs
 import astropy.io.fits as pyfits
@@ -78,7 +84,7 @@ class BeamProfile(object):
     can be either read from a white-space delimited text file (with the angle in degrees in the first column
     and the response in the second column; or as a beam transform file with *l* in the first column, and
     *B*\ :sub:`l` in the second column), or can be set directly using arrays.
-    
+
     Args:
         beamFileName(:obj:`str`, optional): Path to text file containing a beam profile (or transform) in
             the ACT format.
@@ -88,16 +94,16 @@ class BeamProfile(object):
 
     Attributes:
         profile1d (:obj:`np.ndarray`): One dimensional beam profile, with index 0 at the centre.
-        rDeg (:obj:`np.ndarray`): Corresponding angular distance in degrees from the centre for the 
+        rDeg (:obj:`np.ndarray`): Corresponding angular distance in degrees from the centre for the
             beam profile.
-        tck (:obj:`tuple`): Spline knots for interpolating the beam onto different angular binning 
+        tck (:obj:`tuple`): Spline knots for interpolating the beam onto different angular binning
             (in degrees), for use with :meth:`scipy.interpolate.splev`.
         FWHMArcmin (float): Estimate of the beam FWHM in arcmin.
 
     """
-    
+
     def __init__(self, beamFileName = None, profile1d = None, rDeg = None):
-        
+
         if beamFileName is not None:
             beamData=np.loadtxt(beamFileName).transpose()
             # Identify if beam file is a profile or a transform
@@ -126,7 +132,7 @@ class BeamProfile(object):
 
         if self.profile1d is not None and self.rDeg is not None:
             self.tck=interpolate.splrep(self.rDeg, self.profile1d)
-        
+
         # This is really just for sorting a list of beams by resolution
         self.FWHMArcmin=self.rDeg[np.argmin(abs(self.profile1d-0.5))]*60*2
 
@@ -134,7 +140,7 @@ class BeamProfile(object):
 class QFit(object):
     """A class for managing the filter mismatch function, referred to as `Q` in the ACT papers from
     `Hasselfield et al. (2013) <http://adsabs.harvard.edu/abs/2013JCAP...07..008H>`_ onwards.
-    
+
     Args:
         QSource (:obj:`str`, optional): The source to use for Q (the filter mismatch function) - either
             'fit' (to use results from the original Q-fitting routine), 'injection' (to use Q derived
@@ -148,13 +154,13 @@ class QFit(object):
         QFitFileName (`str`, optional): Path to a FITStable containing Q fits for all tiles - this is
             normally ``selFn/QFit.fits``). This is only used if QSource is set to ``fit``.
         tileNames (:obj:`list`): If given, the Q-function will be defined only for these tiles.
-    
+
     Attributes:
         fitDict (:obj:`dict`): Dictionary of interpolation objects, indexed by `tileName`. You should not
             need to access this directly - use :meth:`getQ` instead.
-    
+
     """
-        
+
     def __init__(self, QSource = 'fit', selFnDir = None, QFitFileName = None, tileNames = None):
         self._zGrid=np.array([0.05, 0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0])
         self._theta500ArcminGrid=np.logspace(np.log10(0.1), np.log10(55), 10)
@@ -194,16 +200,16 @@ class QFit(object):
 
         return theta500s, thetaQ
 
-        
+
     def loadQ(self, QFitFileName, tileNames = None):
-        """Load the filter mismatch function Q (see `Hasselfield et al. 2013 
+        """Load the filter mismatch function Q (see `Hasselfield et al. 2013
         <https://ui.adsabs.harvard.edu/abs/2013JCAP...07..008H/abstract>`_) as a dictionary of spline fits.
-        
+
         Args:
             QFitFileName(:obj:`str`): The path to a .fits table (containing Q fits for all tiles - this is
                 normally ``selFn/QFit.fits``).
-            tileNames (optional, list): A list of tiles for which the Q function spline fit coefficients 
-                will be extracted. If source is a :obj:`nemo.startUp.NemoConfig` object, this should be set to 
+            tileNames (optional, list): A list of tiles for which the Q function spline fit coefficients
+                will be extracted. If source is a :obj:`nemo.startUp.NemoConfig` object, this should be set to
                 ``None``.
 
         Returns:
@@ -263,9 +269,9 @@ class QFit(object):
 
     def _makeInterpolatorFromQTab(self, QTab):
         """Inspects QTab, and makes an interpolator object - 2d if there is z-dependence, 1d if not.
-        
+
         """
-        
+
         if QTab.meta['ZDEPQ'] == 0:
             QTab.sort('theta500Arcmin')
             spline=interpolate.InterpolatedUnivariateSpline(QTab['theta500Arcmin'], QTab['Q'], ext = 1)
@@ -288,42 +294,42 @@ class QFit(object):
             self.zDependent=True
         else:
             raise Exception("Valid ZDEPQ values are 0 or 1 only")
-        
+
         return spline
-        
-        
+
+
     def getQ(self, theta500Arcmin, z = None, tileName = None):
         """Return the value of Q (the filter mismatch function) using interpolation.
-        
+
         Args:
             theta500Arcmin (:obj:`float` or :obj:`np.ndarray`): The angular scale at which *Q* will
                 be calculated. This can be an array or a single value.
             z (:obj:`float`, optional): Redshift, only used if *Q* is a function of
-                redshift, otherwise it is ignored. This must be a single value only, 
+                redshift, otherwise it is ignored. This must be a single value only,
                 i.e., not an array.
             tileName (:obj:`str`, optional): The name of the tile to use for the *Q* function.
                 If None, or if the given tileName is not found, then an average over all tiles
                 is used.
-            
+
         Returns:
             The value of *Q* (an array or a single float, depending on the input).
-            
+
         Note:
             In the case where *Q* is a function of redshift, values outside of the range for which
             *Q* has been calculated will be filled with zeros (i.e., there is no extrapolation in
             redshift).
-                    
+
         """
 
         if tileName not in self.fitDict.keys():
             tileName=None
-        
+
         if z is not None:
             if type(z) == np.ndarray and z.shape == (1,):
                 z=float(z)
             if type(z) is not float and type(z) is not np.float64:
                 raise Exception("z must be a float, and not, e.g., an array")
-        
+
         if self.zDependent == True:
             Qs=self.fitDict[tileName](z, theta500Arcmin)[0]
             thetaMask=theta500Arcmin > self.zDepThetaMax(z)
@@ -337,22 +343,22 @@ class QFit(object):
         if (Qs < 0).sum() > 0:
             #print("WARNING: negative Q value in tileName = %s" % (tileName))
             Qs[Qs < 0]=0
-        
+
         return Qs
 
 #------------------------------------------------------------------------------------------------------------
 def fSZ(obsFrequencyGHz, TCMBAlpha = 0.0, z = None):
     """Returns the frequency dependence of the (non-relativistic) Sunyaev-Zel'dovich effect.
-    
+
     Args:
         obsFrequencyGHz (float): Frequency in GHz at which to calculate fSZ.
         TCMBAlpha (float, optional): This should always be zero unless you really do want to make a model
             where CMB temperature evolves T0*(1+z)^{1-TCMBAlpha}.
         z (float, optional): Redshift - needed only if TCMBAlpha is non-zero.
-    
+
     Returns:
         Value of SZ spectral shape at given frequency (neglecting relativistic corrections).
-        
+
     """
 
     h=constants.h.value
@@ -365,13 +371,13 @@ def fSZ(obsFrequencyGHz, TCMBAlpha = 0.0, z = None):
         assert(z >= 0)
         x=x*np.power(1+z, TCMBAlpha)
     fSZ=x*((np.exp(x)+1)/(np.exp(x)-1))-4.0
-    
+
     return fSZ
 
 #------------------------------------------------------------------------------------------------------------
 def calcRDeltaMpc(z, MDelta, cosmoModel, delta = 500, wrt = 'critical'):
     """Calculate RDelta (e.g., R500c, R200m etc.) in Mpc, for a halo with the given mass and redshift.
-    
+
     Args:
         z (float): Redshift.
         MDelta (float): Halo mass in units of solar masses, using the definition set by `delta` and `wrt`.
@@ -379,10 +385,10 @@ def calcRDeltaMpc(z, MDelta, cosmoModel, delta = 500, wrt = 'critical'):
         delta (float, optional): Overdensity (e.g., typically 500 or 200).
         wrt (str, optional): Use 'critical' or 'mean' to set the definition of density with respect to the
             critical density or mean density at the given redshift.
-    
+
     Returns:
         RDelta (in Mpc)
-    
+
     """
 
     if type(MDelta) == str:
@@ -396,7 +402,7 @@ def calcRDeltaMpc(z, MDelta, cosmoModel, delta = 500, wrt = 'critical'):
     else:
         raise Exception("wrt should be either 'critical' or 'mean'")
     RDeltaMpc=np.power((3*MDelta)/(4*np.pi*delta*wrtDensity), 1.0/3.0)
-        
+
     return RDeltaMpc
 
 #------------------------------------------------------------------------------------------------------------
@@ -407,56 +413,56 @@ def calcR500Mpc(z, M500c, cosmoModel):
         z (float): Redshift.
         M500c (float): Mass within R500c (i.e., with respect to critical density) in units of solar masses.
         cosmoModel (`:obj:`pyccl.Cosmology`): Cosmology object.
-    
+
     Returns:
         R500c (in Mpc)
-    
+
     """
-    
+
     R500Mpc=calcRDeltaMpc(z, M500c, cosmoModel, delta = 500, wrt = 'critical')
-    
+
     return R500Mpc
 
 #------------------------------------------------------------------------------------------------------------
 def calcTheta500Arcmin(z, M500, cosmoModel):
     """Given `z`, `M500` (in MSun), returns the angular size equivalent to R:sub:`500c`, with respect to the
     critical density.
-    
+
     Args:
         z (float): Redshift.
         M500 (float): Mass within R500c (i.e., with respect to critical density) in units of solar masses.
         cosmoModel (`:obj:`pyccl.Cosmology`): Cosmology object.
-    
+
     Returns:
         theta500c (in arcmin)
-    
+
     """
-    
+
     R500Mpc=calcR500Mpc(z, M500, cosmoModel)
     #theta500Arcmin=np.degrees(np.arctan(R500Mpc/cosmoModel.angular_diameter_distance(z).value))*60.0
     theta500Arcmin=np.degrees(np.arctan(R500Mpc/ccl.angular_diameter_distance(cosmoModel, 1/(1+z))))*60.0
-    
+
     return theta500Arcmin
-    
+
 #------------------------------------------------------------------------------------------------------------
 def makeArnaudModelProfile(z, M500, GNFWParams = 'default', cosmoModel = None, binning = 'log'):
-    """Given z, M500 (in MSun), returns dictionary containing Arnaud model profile (well, knots from spline 
-    fit, 'tckP' - assumes you want to interpolate onto an array with units of degrees) and parameters 
+    """Given z, M500 (in MSun), returns dictionary containing Arnaud model profile (well, knots from spline
+    fit, 'tckP' - assumes you want to interpolate onto an array with units of degrees) and parameters
     (particularly 'y0', 'theta500Arcmin').
-    
+
     Use GNFWParams to specify a different shape. If GNFWParams = 'default', then the default parameters as listed
-    in gnfw.py are used, i.e., 
-    
+    in gnfw.py are used, i.e.,
+
     GNFWParams = {'P0': 8.403, 'c500': 1.177, 'gamma': 0.3081, 'alpha': 1.0510, 'beta':  5.4905, 'tol': 1e-7,
                   'npts': 100}
-    
+
     Otherwise, give a dictionary that specifies the wanted values. This would usually be specified as
     GNFWParams in the filter params in the nemo .par file (see the example .par files).
-    
+
     If cosmoModel is None, use default (Om0, Ol0, H0) = (0.3, 0.7, 70 km/s/Mpc) cosmology.
-    
+
     Used by ArnaudModelFilter
-    
+
     """
 
     if cosmoModel is None:
@@ -464,7 +470,7 @@ def makeArnaudModelProfile(z, M500, GNFWParams = 'default', cosmoModel = None, b
 
     if GNFWParams == 'default':
         GNFWParams=gnfw._default_params
-    
+
     # Adjust tol for speed vs. range of b covered
     if binning == 'linear': # Old
         bRange=np.linspace(0, 30, 1000)
@@ -481,47 +487,47 @@ def makeArnaudModelProfile(z, M500, GNFWParams = 'default', cosmoModel = None, b
             break
     cylPProfile=np.array(cylPProfile)
     bRange=bRange[:i+1]
-    
+
     # Normalise to 1 at centre
     cylPProfile=cylPProfile/cylPProfile.max()
 
     # Calculate R500Mpc, theta500Arcmin corresponding to given mass and redshift
     theta500Arcmin=calcTheta500Arcmin(z, M500, cosmoModel)
-    
+
     # Map between b and angular coordinates
     # NOTE: c500 now taken into account in gnfw.py
     thetaDegRange=bRange*(theta500Arcmin/60.)
     tckP=interpolate.splrep(thetaDegRange, cylPProfile)
-    
+
     return {'tckP': tckP, 'theta500Arcmin': theta500Arcmin, 'rDeg': thetaDegRange}
 
 #------------------------------------------------------------------------------------------------------------
 def makeBattagliaModelProfile(z, M500c, GNFWParams = 'default', cosmoModel = None):
     """Given z, M500 (in MSun), returns dictionary containing Battaglia+2012 model profile (well, knots from
-    spline fit, 'tckP' - assumes you want to interpolate onto an array with units of degrees) and parameters 
+    spline fit, 'tckP' - assumes you want to interpolate onto an array with units of degrees) and parameters
     (particularly 'y0', 'theta500Arcmin').
-    
+
     Use GNFWParams to specify a different shape. If GNFWParams = 'default', then the default parameters as
     listed in Battaglia et al. 2012 are used, i.e., GNFWParams = {'gamma': 0.3, 'alpha': 1.0, 'beta': 4.49,
     'c500': 1.408, 'tol': 1e-7, 'npts': 100}. Note that the definitions/sign convention is slightly
-    different in Battaglia+2012 compared to Arnaud+2010 (we follow the latter). 
-    
+    different in Battaglia+2012 compared to Arnaud+2010 (we follow the latter).
+
     Otherwise, give a dictionary that specifies the wanted values. This would usually be specified as
     GNFWParams in the filter params in the nemo .par file (see the example .par files).
-    
+
     If cosmoModel is None, use default (Om0, Ol0, H0) = (0.3, 0.7, 70 km/s/Mpc) cosmology.
-    
+
     Used by ArnaudModelFilter
-    
+
     """
 
     if cosmoModel is None:
         cosmoModel=fiducialCosmoModel
-    
+
     if GNFWParams == 'default':
         # NOTE: These are Table 1 values from Battaglia+2012 for M500c
         GNFWParams={'P0': 7.49, 'gamma': 0.3, 'alpha': 1.0, 'beta': 4.49, 'c500': 1.408, 'tol': 1e-7, 'npts': 100}
-    
+
     # Redshift dependence
     # (we do P0 here anyway but since we have arbitrary normalization that seems pointless)
     # These are all defined for M200c in Battaglia+2012
@@ -542,14 +548,14 @@ def makeBattagliaModelProfile(z, M500c, GNFWParams = 'default', cosmoModel = Non
     P0z=P0*np.power(M200c/1e14, P0_alpha_m)*np.power(1+z, P0_alpha_z)
     xcz=xc*np.power(M200c/1e14, xc_alpha_m)*np.power(1+z, xc_alpha_z)
     betaz=beta*np.power(M200c/1e14, beta_alpha_m)*np.power(1+z, beta_alpha_z)
-    
+
     # Some more B12 -> A10 notation conversion
     GNFWParams['P0']=P0z
     GNFWParams['beta']=betaz+0.3
     GNFWParams['c500']=1/xcz
     GNFWParams['gamma']=0.3
-    GNFWParams['alpha']=1.0    
-    
+    GNFWParams['alpha']=1.0
+
     # Adjust tol for speed vs. range of b covered
     # bRange=np.linspace(0, 30, 1000) # old
     bRange=np.logspace(np.log10(1e-6), np.log10(100), 300)
@@ -562,54 +568,54 @@ def makeBattagliaModelProfile(z, M500c, GNFWParams = 'default', cosmoModel = Non
             break
     cylPProfile=np.array(cylPProfile)
     bRange=bRange[:i+1]
-    
+
     # Normalise to 1 at centre
     cylPProfile=cylPProfile/cylPProfile.max()
 
     # Calculate R500Mpc, theta500Arcmin corresponding to given mass and redshift
     theta500Arcmin=calcTheta500Arcmin(z, M500c, cosmoModel)
-    
+
     # Map between b and angular coordinates
     # NOTE: c500 now taken into account in gnfw.py
     thetaDegRange=bRange*(theta500Arcmin/60.)
     tckP=interpolate.splrep(thetaDegRange, cylPProfile)
-    
+
     return {'tckP': tckP, 'theta500Arcmin': theta500Arcmin, 'rDeg': thetaDegRange}
 
 
 #------------------------------------------------------------------------------------------------------------
 def makeBeamModelSignalMap(degreesMap, wcs, beam, amplitude = None):
     """Makes a 2d signal only map containing the given beam.
-    
+
     Args:
         degreesMap (:obj:`np.ndarray`): Map of angular distance from the object position.
         wcs (:obj:`astWCS.WCS`): WCS corresponding to degreesMap.
-        beam (:obj:`BeamProfile` or str): Either a BeamProfile object, or a string that gives the path to a 
+        beam (:obj:`BeamProfile` or str): Either a BeamProfile object, or a string that gives the path to a
             text file that describes the beam profile.
-        amplitude (:obj: float, optional): Specifies the amplitude of the input signal (in map units, 
+        amplitude (:obj: float, optional): Specifies the amplitude of the input signal (in map units,
             e.g., uK), before beam convolution. This is only needed if this routine is being used to inject
             sources into maps. It is not needed for making filter kernels.
-        
+
     Returns:
         signalMap (:obj:`np.ndarray`)
 
     Note:
-        The pixel window function is not applied here; use pixell.enmap.apply_window to do that (see 
+        The pixel window function is not applied here; use pixell.enmap.apply_window to do that (see
         nemo.filters.filterMaps).
-        
+
     """
-    
+
     if amplitude is None:
         amplitude=1.0
-    
+
     if type(beam) == str:
-        beam=BeamProfile(beamFileName = beam)        
+        beam=BeamProfile(beamFileName = beam)
     profile1d=amplitude*beam.profile1d
 
     # Turn 1d profile into 2d
     r2p=interpolate.interp1d(beam.rDeg, profile1d, bounds_error=False, fill_value=0.0)
     signalMap=r2p(degreesMap)
-    
+
     return signalMap
 
 #------------------------------------------------------------------------------------------------------------
@@ -670,7 +676,7 @@ def makeArnaudModelSignalMap(z, M500, shape, wcs, beam = None, RADeg = None, dec
                              GNFWParams = 'default', amplitude = None, maxSizeDeg = 15.0,\
                              convolveWithBeam = True, cosmoModel = None, painter = 'pixell'):
     """Makes a 2d signal only map containing an Arnaud model cluster.
-    
+
     Args:
         z (float): Redshift; used for setting angular size.
         M500 (float): Mass within R500, defined with respect to critical density; units are solar masses.
@@ -681,31 +687,31 @@ def makeArnaudModelSignalMap(z, M500, shape, wcs, beam = None, RADeg = None, dec
             no beam convolution is applied.
         RADeg (float, or array, optional): If None, the signal will be inserted at the center of the generated map.
         decDeg (float, or array, optional): If None, the signal will be inserted at the center of the generated map.
-        GNFWParams (dict, optional): Used to specify a different profile shape to the default (which follows 
-            Arnaud et al. 2010). If GNFWParams = 'default', then the default parameters as listed in 
-            gnfw.py are used, i.e., GNFWParams = {'gamma': 0.3081, 'alpha': 1.0510, 'beta': 5.4905, 
-            'tol': 1e-7, 'npts': 100}. Otherwise, give a dictionary that specifies the wanted values. This 
+        GNFWParams (dict, optional): Used to specify a different profile shape to the default (which follows
+            Arnaud et al. 2010). If GNFWParams = 'default', then the default parameters as listed in
+            gnfw.py are used, i.e., GNFWParams = {'gamma': 0.3081, 'alpha': 1.0510, 'beta': 5.4905,
+            'tol': 1e-7, 'npts': 100}. Otherwise, give a dictionary that specifies the wanted values. This
             would usually be specified using the GNFWParams key in the .yml config used when running nemo
             (see the examples/ directory).
         amplitude (float, or array, optional): Amplitude of the cluster, i.e., the central decrement (in map units,
-            e.g., uK), or the central Comptonization parameter (dimensionless), before beam convolution. 
+            e.g., uK), or the central Comptonization parameter (dimensionless), before beam convolution.
             Not needed for generating filter kernels.
-        maxSizeDeg (float, optional): Use to limit the region over which the beam convolution is done, 
+        maxSizeDeg (float, optional): Use to limit the region over which the beam convolution is done,
             for optimization purposes.
         convolveWithBeam (bool, optional): If False, no beam convolution is done.
-    
+
     Returns:
         signalMap (:obj:`np.ndarray`).
 
     Note:
-        The pixel window function is not applied here; use pixell.enmap.apply_window to do that (see 
-        nemo.filters.filterMaps).    
+        The pixel window function is not applied here; use pixell.enmap.apply_window to do that (see
+        nemo.filters.filterMaps).
 
     Note:
         If arrays of sky coordinates and amplitudes are given, multiple clusters (with the same profile) will
         be painted in the map. This is useful for running cluster injection simulations for estimating
         completeness, but only works with the 'pixell' object painter.
-        
+
     """
 
     if RADeg is None or decDeg is None:
@@ -784,7 +790,7 @@ def makeBattagliaModelSignalMap(z, M500, shape, wcs, beam = None, RADeg = None, 
     ## Making the 1d profile itself is the slowest part (~1 sec)
     #signalDict=makeBattagliaModelProfile(z, M500, GNFWParams = GNFWParams)
     #tckP=signalDict['tckP']
-    
+
     ## Make cluster map (unit-normalised profile)
     #rDeg=np.linspace(0.0, maxSizeDeg, 5000)
     #profile1d=interpolate.splev(rDeg, tckP, ext = 1)
@@ -792,7 +798,7 @@ def makeBattagliaModelSignalMap(z, M500, shape, wcs, beam = None, RADeg = None, 
         #profile1d=profile1d*amplitude
     #r2p=interpolate.interp1d(rDeg, profile1d, bounds_error=False, fill_value=0.0)
     #signalMap=r2p(degreesMap)
-    
+
     #if convolveWithBeam == True:
         #signalMap=maps.convolveMapWithBeam(signalMap, wcs, beam, maxDistDegrees = maxSizeDeg)
 
@@ -802,19 +808,19 @@ def makeBattagliaModelSignalMap(z, M500, shape, wcs, beam = None, RADeg = None, 
     return _paintSignalMap(shape, wcs, tckP, beam = beam, RADeg = RADeg, decDeg = decDeg,
                            amplitude = amplitude, maxSizeDeg = maxSizeDeg,
                            convolveWithBeam = convolveWithBeam)
-    
+
     return signalMap
 
 #------------------------------------------------------------------------------------------------------------
 def getFRelWeights(config):
-    """Returns a dictionary of frequency weights used in relativistic corrections for each tile. This is 
+    """Returns a dictionary of frequency weights used in relativistic corrections for each tile. This is
     cached in the selFn/ dir after the first time this routine is called.
-    
+
     """
-    
+
     if 'photFilter' not in config.parDict.keys() or config.parDict['photFilter'] is None:
         return {}
-    
+
     fRelWeightsFileName=config.selFnDir+os.path.sep+"fRelWeights.fits"
     if os.path.exists(fRelWeightsFileName) == False:
         fRelTab=atpy.Table()
@@ -834,14 +840,14 @@ def getFRelWeights(config):
                         fRelTab[freqGHz][tileCount]=img[0].header['RW%d' % (i)]
         fRelTab.meta['NEMOVER']=nemo.__version__
         fRelTab.write(fRelWeightsFileName, overwrite = True)
-    
+
     return loadFRelWeights(fRelWeightsFileName)
 
 #------------------------------------------------------------------------------------------------------------
 def loadFRelWeights(fRelWeightsFileName):
     """Returns a dictionary of frequency weights used in relativistic corrections for each tile (stored in
     a .fits table, made by getFRelWeights).
-    
+
     """
 
     fRelTab=atpy.Table().read(fRelWeightsFileName)
@@ -851,33 +857,33 @@ def loadFRelWeights(fRelWeightsFileName):
         for key in fRelTab.keys():
             if key != 'tileName':
                 fRelWeightsDict[row['tileName']][float(key)]=row[key]
-    
+
     return fRelWeightsDict
 
 #------------------------------------------------------------------------------------------------------------
 def fitQ(config):
     """Calculates the filter mismatch function *Q* on a grid of scale sizes for each tile in the map. The
     results are combined into a single file written under the `selFn` directory.
-    
+
     The `GNFWParams` key in the `config` dictionary can be used to specify a different cluster profile shape.
-    
+
     Args:
         config (:obj:`startUp.NemoConfig`): A NemoConfig object.
-    
+
     Note:
         See :class:`QFit` for how to read in and use the file produced by this function.
-        
+
     """
-    
+
     cosmoModel=fiducialCosmoModel
-        
+
     # Spin through the filter kernels
     photFilterLabel=config.parDict['photFilter']
     filterList=config.parDict['mapFilters']
     for f in filterList:
         if f['label'] == photFilterLabel:
             ref=f
-    
+
     # This could be more general... but A10 model has no z-dependence, B12 model does
     # So Q is a function of (theta500, z) for the latter
     # We add a header keyword to the QFit.fits table to indicate if z-dependence important or not
@@ -890,7 +896,7 @@ def fitQ(config):
         zDepQ=1
     else:
         raise Exception("Signal model for Q calculation should either be 'Arnaud' or 'Battaglia'")
-    
+
     # M, z -> theta ranges for Q calc - what's most efficient depends on whether there is z-dependence, or not
     # NOTE: ref filter that sets scale we compare to must ALWAYS come first
     if zDepQ == 0:
@@ -957,8 +963,8 @@ def fitQ(config):
         signalMapSizeDeg=15.0
     else:
         raise Exception("valid values for zDepQ are 0 or 1")
-            
-    # Here we save the fit for each tile separately... 
+
+    # Here we save the fit for each tile separately...
     QTabDict={}
     for tileName in config.tileNames:
         t0=time.time()
@@ -974,16 +980,16 @@ def fitQ(config):
             raise Exception("couldn't find filter that matches photFilter")
         filterClass=eval('filters.%s' % (filt['class']))
         filterObj=filterClass(filt['label'], config.unfilteredMapsDictList, filt['params'], \
-                              tileName = tileName, 
+                              tileName = tileName,
                               diagnosticsDir = config.diagnosticsDir)
         filterObj.loadFilter()
-        
+
         # Real space kernel or Fourier space filter?
         if issubclass(filterObj.__class__, filters.RealSpaceMatchedFilter) == True:
             realSpace=True
         else:
             realSpace=False
-        
+
         # Set-up the beams
         beamsDict={}
         for mapDict in config.parDict['unfilteredMaps']:
@@ -1125,9 +1131,9 @@ def fitQ(config):
 #------------------------------------------------------------------------------------------------------------
 def calcWeightedFRel(z, M500, Ez, fRelWeightsDict):
     """Return fRel for the given (z, M500), weighted by frequency according to fRelWeightsDict
-    
+
     """
-    
+
     fRels=[]
     freqWeights=[]
     for obsFreqGHz in fRelWeightsDict.keys():
@@ -1135,19 +1141,19 @@ def calcWeightedFRel(z, M500, Ez, fRelWeightsDict):
             fRels.append(calcFRel(z, M500, Ez, obsFreqGHz = obsFreqGHz))
             freqWeights.append(fRelWeightsDict[obsFreqGHz])
     fRel=np.average(fRels, weights = freqWeights)
-    
+
     return fRel
-    
+
 #------------------------------------------------------------------------------------------------------------
 def calcFRel(z, M500, Ez, obsFreqGHz = 148.0):
     """Calculates relativistic correction to SZ effect at specified frequency, given z, M500 in MSun.
-       
+
     This assumes the Arnaud et al. (2005) M-T relation, and applies formulae of Itoh et al. (1998)
-    
+
     As for H13, we return fRel = 1 + delta_SZE (see also Marriage et al. 2011)
 
     """
-    
+
     # NOTE: we should define constants somewhere else...
     h=6.63e-34
     kB=1.38e-23
@@ -1155,7 +1161,7 @@ def calcFRel(z, M500, Ez, obsFreqGHz = 148.0):
     me=9.11e-31
     e=1.6e-19
     c=3e8
-    
+
     # Using Arnaud et al. (2005) M-T to get temperature
     A=3.84e14
     B=1.71
@@ -1194,14 +1200,14 @@ def calcFRel(z, M500, Ez, obsFreqGHz = 148.0):
     deltaSZE=((X**3)/(np.exp(X)-1)) * ((thetae*X*np.exp(X))/(np.exp(X)-1)) * (Y0 + Y1*thetae + Y2*thetae**2 + Y3*thetae**3 + Y4*thetae**4)
 
     fRel=1+deltaSZE
-    
+
     return fRel
 
 #------------------------------------------------------------------------------------------------------------
 def getM500FromP(P, log10M, calcErrors = True):
-    """Returns M500 as the maximum likelihood value from given P(log10M) distribution, together with 
+    """Returns M500 as the maximum likelihood value from given P(log10M) distribution, together with
     1-sigma error bars (M500, -M500Err, +M500 err).
-    
+
     """
 
     # Find max likelihood and integrate to get error bars
@@ -1210,7 +1216,7 @@ def getM500FromP(P, log10M, calcErrors = True):
     fineP=interpolate.splev(fineLog10M, tckP)
     fineP=fineP/np.trapz(fineP, fineLog10M)
     index=np.argmax(fineP)
-    
+
     clusterLogM500=fineLog10M[index]
     clusterM500=np.power(10, clusterLogM500)/1e14
 
@@ -1231,11 +1237,11 @@ def getM500FromP(P, log10M, calcErrors = True):
                 clusterLogM500Max=fineLog10M[maxIndex]
                 clusterM500MinusErr=(np.power(10, clusterLogM500)-np.power(10, clusterLogM500Min))/1e14
                 clusterM500PlusErr=(np.power(10, clusterLogM500Max)-np.power(10, clusterLogM500))/1e14
-                break        
+                break
     else:
         clusterM500MinusErr=0.
         clusterM500PlusErr=0.
-    
+
     return clusterM500, clusterM500MinusErr, clusterM500PlusErr
 
 #------------------------------------------------------------------------------------------------------------
@@ -1243,27 +1249,27 @@ def y0FromLogM500(log10M500, z, tckQFit, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 
                   cosmoModel = None, applyRelativisticCorrection = True, fRelWeightsDict = {148.0: 1.0}):
     """Predict y0~ given logM500 (in MSun) and redshift. Default scaling relation parameters are A10 (as in
     H13).
-    
+
     Use cosmoModel (:obj:`pyccl.Cosmology`) to change/specify cosmological parameters.
-    
+
     fRelWeightsDict is used to account for the relativistic correction when y0~ has been constructed
     from multi-frequency maps. Weights should sum to 1.0; keys are observed frequency in GHz.
-    
+
     Returns y0~, theta500Arcmin, Q
-    
+
     NOTE: Depreciated? Nothing we have uses this.
-    
+
     """
 
     if type(Mpivot) == str:
         raise Exception("Mpivot is a string - check Mpivot in your .yml config file: use, e.g., 3.0e+14 (not 3e14 or 3e+14)")
-        
+
     # Filtering/detection was performed with a fixed fiducial cosmology... so we don't need to recalculate Q
     # We just need to recalculate theta500Arcmin and E(z) only
     M500=np.power(10, log10M500)
     theta500Arcmin=calcTheta500Arcmin(z, M500, cosmoModel)
     Q=calcQ(theta500Arcmin, tckQFit)
-    
+
     # Relativistic correction: now a little more complicated, to account for fact y0~ maps are weighted sum
     # of individual frequency maps, and relativistic correction size varies with frequency
     if applyRelativisticCorrection == True:
@@ -1275,81 +1281,81 @@ def y0FromLogM500(log10M500, z, tckQFit, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 
         fRel=np.average(np.array(fRels), axis = 0, weights = freqWeights)
     else:
         fRel=1.0
-    
+
     # UPP relation according to H13
     # NOTE: m in H13 is M/Mpivot
     # NOTE: this goes negative for crazy masses where the Q polynomial fit goes -ve, so ignore those
     y0pred=tenToA0*np.power(cosmoModel.efunc(z), 2)*np.power(M500/Mpivot, 1+B0)*Q*fRel
-    
+
     return y0pred, theta500Arcmin, Q
-            
+
 #------------------------------------------------------------------------------------------------------------
-def calcMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 3e14, 
+def calcMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 3e14,
              sigma_int = 0.2, Ez_gamma = 2, onePlusRedshift_power = 0.0, applyMFDebiasCorrection = True, applyRelativisticCorrection = True,
              calcErrors = True, fRelWeightsDict = {148.0: 1.0}, tileName = None):
     """Returns M500 +/- errors in units of 10^14 MSun, calculated assuming a y0 - M relation (default values
     assume UPP scaling relation from Arnaud et al. 2010), taking into account the steepness of the mass
     function. The approach followed is described in H13, Section 3.2.
-    
+
     Here, mockSurvey is a MockSurvey object. We're using this to handle the halo mass function calculations
-    (in turn using the Colossus module). Supplying mockSurvey is no longer optional (and handles setting the 
+    (in turn using the Colossus module). Supplying mockSurvey is no longer optional (and handles setting the
     cosmology anyway when initialised or updated).
-    
+
     tckQFit is a set of spline knots, as returned by fitQ.
-    
+
     If applyMFDebiasCorrection == True, apply correction that accounts for steepness of mass function.
-    
+
     If applyRelativisticCorrection == True, apply relativistic correction (weighted by frequency using the
     contents of fRelWeightsDict).
-    
+
     If calcErrors == False, error bars are not calculated, they are just set to zero.
-    
+
     fRelWeightsDict is used to account for the relativistic correction when y0~ has been constructed
     from multi-frequency maps. Weights should sum to 1.0; keys are observed frequency in GHz.
-        
+
     Returns dictionary with keys M500, M500_errPlus, M500_errMinus
-    
+
     """
-    
+
     if y0 < 0:
         raise Exception('y0 cannot be negative')
     if y0 > 1e-2:
         raise Exception('y0 is suspiciously large - probably you need to multiply by 1e-4')
-            
+
     P, bestQ=calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = tenToA0, B0 = B0, Mpivot = Mpivot,
                        sigma_int = sigma_int, Ez_gamma = Ez_gamma, onePlusRedshift_power = onePlusRedshift_power,
                        applyMFDebiasCorrection = applyMFDebiasCorrection,
                        applyRelativisticCorrection = applyRelativisticCorrection, fRelWeightsDict = fRelWeightsDict,
                        tileName = tileName, returnQ = True)
-    
+
     M500, errM500Minus, errM500Plus=getM500FromP(P, mockSurvey.log10M, calcErrors = calcErrors)
-    
+
     label=mockSurvey.mdefLabel
-    
+
     return {'%s' % (label): M500, '%s_errPlus' % (label): errM500Plus, '%s_errMinus' % (label): errM500Minus,
             'Q': bestQ}
 
 #------------------------------------------------------------------------------------------------------------
-def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 3e14, 
-              sigma_int = 0.2, Ez_gamma = 2, onePlusRedshift_power = 0.0, applyMFDebiasCorrection = True, 
+def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 3e14,
+              sigma_int = 0.2, Ez_gamma = 2, onePlusRedshift_power = 0.0, applyMFDebiasCorrection = True,
               applyRelativisticCorrection = True, fRelWeightsDict = {148.0: 1.0}, return2D = False,
               returnQ = False, tileName = None):
-    """Calculates P(M500) assuming a y0 - M relation (default values assume UPP scaling relation from Arnaud 
-    et al. 2010), taking into account the steepness of the mass function. The approach followed is described 
+    """Calculates P(M500) assuming a y0 - M relation (default values assume UPP scaling relation from Arnaud
+    et al. 2010), taking into account the steepness of the mass function. The approach followed is described
     in H13, Section 3.2. The binning for P(M500) is set according to the given mockSurvey, as are the assumed
     cosmological parameters.
-    
+
     This routine is used by calcMass.
-    
+
     Ez_gamma is E(z)^gamma factor (we assumed E(z)^2 previously)
-    
+
     onePlusRedshift_power: added multiplication by (1+z)**onePlusRedshift_power (for checking evolution)
-    
+
     If return2D == True, returns a grid of same dimensions / binning as mockSurvey.z, mockSurvey.log10M,
     normalised such that the sum of the values is 1.
-    
+
     """
-    
+
     # For marginalising over photo-z errors (we assume +/-5 sigma is accurate enough)
     if zErr > 0:
         zMin=z-zErr*5
@@ -1367,17 +1373,17 @@ def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08
 
     log_y0=np.log(y0)
     log_y0Err=y0Err/y0
-        
+
     # NOTE: Swap below if want to use bigger log10M range...
     log10Ms=mockSurvey.log10M
     #log10MStep=mockSurvey.log10M[1]-mockSurvey.log10M[0]
     #log10Ms=np.arange(-100.0, 100.0, log10MStep)
-            
+
     PArr=[]
     for k in range(len(zRange)):
-        
+
         zk=zRange[k]
-        
+
         # We've generalised mockSurvey to be able to use e.g. M200m, but Q defined for theta500c
         # So, need a mapping between M500c and whatever mass definition used in mockSurvey
         # This only needed for extracting Q, fRel values
@@ -1387,11 +1393,11 @@ def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08
                                                             1/(1+zk)))
         else:
             log10M500c_zk=log10Ms
-                
+
         mockSurvey_zIndex=np.argmin(abs(mockSurvey.z-zk))
         theta500s=interpolate.splev(log10M500c_zk, mockSurvey.theta500Splines[mockSurvey_zIndex], ext = 3)
         Qs=QFit.getQ(theta500s, zk, tileName = tileName)
-        fRels=interpolate.splev(log10M500c_zk, mockSurvey.fRelSplines[mockSurvey_zIndex], ext = 3)   
+        fRels=interpolate.splev(log10M500c_zk, mockSurvey.fRelSplines[mockSurvey_zIndex], ext = 3)
         fRels[np.less_equal(fRels, 0)]=1e-4   # For extreme masses (> 10^16 MSun) at high-z, this can dip -ve
         y0pred=tenToA0*np.power(mockSurvey.Ez[mockSurvey_zIndex], Ez_gamma)*np.power(np.power(10, log10Ms)/Mpivot, 1+B0)*Qs
         y0pred=y0pred*np.power(1+zk, onePlusRedshift_power)
@@ -1412,17 +1418,17 @@ def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08
             PLog10M=PLog10M/np.trapz(PLog10M, log10Ms)
         else:
             PLog10M=1.0
-        
+
         P=Py0GivenM*PLog10M*Pz[k]
         PArr.append(P)
-        
+
     # 2D PArr is what we would want to project onto (M, z) grid
     PArr=np.array(PArr)
-        
+
     # Marginalised over z uncertainty
     P=np.sum(PArr, axis = 0)
     P=P/np.trapz(P, log10Ms)
-    
+
     # If we want Q corresponding to mass (need more work to add errors if we really want them)
     PQ=P/np.trapz(P, Qs)
     fittedQ=Qs[np.argmax(PQ)]
@@ -1430,7 +1436,7 @@ def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08
     # Reshape to (M, z) grid - use this if use different log10M range to mockSurvey
     #tck=interpolate.splrep(log10Ms, P)
     #P=interpolate.splev(mockSurvey.log10M, tck, ext = 1)
-        
+
     if return2D == True:
         P2D=np.zeros(mockSurvey.clusterCount.shape)
         if zErr == 0:
@@ -1457,48 +1463,48 @@ FX_TCK=interpolate.splrep(x, fx)
 #------------------------------------------------------------------------------------------------------------
 def gz(zIn, zMax = 1000, dz = 0.1):
     """Calculates linear growth factor at redshift z. Use Dz if you want normalised to D(z) = 1.0 at z = 0.
-    
+
     See http://www.astronomy.ohio-state.edu/~dhw/A873/notes8.pdf for some notes on this.
-    
+
     """
-    
+
     zRange=np.arange(zIn, zMax, dz)
     HzPrime=[]
     for zPrime in zRange:
         HzPrime.append(astCalc.Ez(zPrime)*astCalc.H0)
     HzPrime=np.array(HzPrime)
     gz=astCalc.Ez(zIn)*np.trapz((np.gradient(zRange)*(1+zRange)) / np.power(HzPrime, 3), zRange)
-    
+
     return gz
 
 #------------------------------------------------------------------------------------------------------------
 def calcDz(zIn):
     """Calculate linear growth factor, normalised to D(z) = 1.0 at z = 0.
-    
+
     """
     return gz(zIn)/gz(0.0)
 
 #------------------------------------------------------------------------------------------------------------
 def criticalDensity(z):
     """Returns the critical density at the given z.
-    
+
     """
-    
+
     G=4.301e-9  # in MSun-1 km2 s-2 Mpc, see Robotham GAMA groups paper
     Hz=astCalc.H0*astCalc.Ez(z)
     rho_crit=((3*np.power(Hz, 2))/(8*np.pi*G))
-    
+
     return rho_crit
 
 #------------------------------------------------------------------------------------------------------------
 def meanDensity(z):
     """Returns the mean density at the given z.
-    
+
     """
-    
+
     rho_mean=astCalc.OmegaMz(z)*criticalDensity(z)
-    
-    return rho_mean  
+
+    return rho_mean
 
 #------------------------------------------------------------------------------------------------------------
 def MDef1ToMDef2(mass, z, MDef1, MDef2, cosmoModel, c_m_relation = 'Bhattacharya13'):
@@ -1536,9 +1542,9 @@ def MDef1ToMDef2(mass, z, MDef1, MDef2, cosmoModel, c_m_relation = 'Bhattacharya
 #------------------------------------------------------------------------------------------------------------
 def M500cToMdef(M500c, z, massDef, cosmoModel, c_m_relation = 'Bhattacharya13'):
     """Convert M500c to some other mass definition.
-    
+
     massDef (`obj`:ccl.halos.MassDef): CCL halo mass definition
-    
+
     """
 
     return MDef1ToMDef2(M500c, z, ccl.halos.MassDef(500, "critical"), massDef, cosmoModel,
@@ -1550,34 +1556,34 @@ def convertM200mToM500c(M200m, z):
     relation: http://adsabs.harvard.edu/abs/2013ApJ...766...32B
 
     See also Hu & Kravtsov: http://iopscience.iop.org/article/10.1086/345846/pdf
-    
+
     """
-        
+
     # c-M relation for full cluster sample
     Dz=calcDz(z)    # <--- this is the slow part. 3 seconds!
     nu200m=(1./Dz)*(1.12*np.power(M200m / (5e13 * np.power(astCalc.H0/100., -1)), 0.3)+0.53)
     c200m=np.power(Dz, 1.15)*9.0*np.power(nu200m, -0.29)
-    
+
     rho_crit=criticalDensity(z)
     rho_mean=meanDensity(z)
     R200m=np.power((3*M200m)/(4*np.pi*200*rho_mean), 1/3.)
 
     rs=R200m/c200m
-    
+
     f_rsOverR500c=((500*rho_crit) / (200*rho_mean)) * interpolate.splev(1./c200m, FX_TCK)
     x_rsOverR500c=interpolate.splev(f_rsOverR500c, XF_TCK)
     R500c=rs/x_rsOverR500c
 
     M500c=(4/3.0)*np.pi*R500c**3*(500*rho_crit)
-        
+
     return M500c, R500c
 
 #------------------------------------------------------------------------------------------------------------
 def convertM500cToM200m(M500c, z):
     """Returns M200m given M500c
-    
+
     """
-    
+
     tolerance=1e-5
     scaleFactor=3.0
     ratio=1e6
@@ -1589,7 +1595,7 @@ def convertM500cToM200m(M500c, z):
         count=count+1
         if count > 10:
             raise Exception("M500c -> M200m conversion didn't converge quickly enough")
-        
+
     M200m=scaleFactor*M500c
-    
+
     return M200m
