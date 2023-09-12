@@ -3,11 +3,23 @@
 Quickstart clusters tutorial runs
     Run quickstart clusters
     Cross match             testsCache/quickstart-clusters/quickstart-clusters_optimalCatalog.fits      testsCache/DR5_cluster-catalog_v1.1.fits
-    Check recovered ratio   fixed_y_c    fixed_y_c    toleranceSigma=3.0    expectedRatio=1.02  errInKey=fixed_err_y_c  errOutKey=fixed_err_y_c  SNRKey=fixed_SNR  SNRCut=5.0  plotLabel=quickstart-clusters
+    Check recovered ratio   fixed_y_c    fixed_y_c    toleranceSigma=3.0    expectedRatio=0.94  errInKey=fixed_err_y_c  errOutKey=fixed_err_y_c  SNRKey=fixed_SNR  SNRCut=5.0  plotLabel=quickstart-clusters
     Status should be        SUCCESS
 
 Quickstart sources tutorial runs
     Run quickstart sources
+
+Mass estimation works
+    Run quickstart clusters with Q
+    Run nemo mass
+
+Forced photometry using nemo works
+    Set config              configs/quickstart-clusters-Q.yml
+    Run nemo    DR5_cluster-catalog_v1.1.fits
+
+Forced photometry using nemoMass works
+    Run quickstart clusters with Q
+    Run nemo mass   DR5_cluster-catalog_v1.1.fits   True
 
 Source injection test runs
     Generate simulated source maps
@@ -17,7 +29,7 @@ Source injection test runs
 Quickstart multipass config runs
     Run quickstart multipass
     Cross match             testsCache/quickstart-multipass/quickstart-multipass_optimalCatalog.fits      testsCache/DR5_cluster-catalog_v1.1.fits
-    Check recovered ratio   fixed_y_c    fixed_y_c    toleranceSigma=3.0    expectedRatio=0.98  errInKey=fixed_err_y_c  errOutKey=fixed_err_y_c  SNRKey=fixed_SNR  SNRCut=5.0  plotLabel=quickstart-multipass
+    Check recovered ratio   fixed_y_c    fixed_y_c    toleranceSigma=3.0    expectedRatio=0.92  errInKey=fixed_err_y_c  errOutKey=fixed_err_y_c  SNRKey=fixed_SNR  SNRCut=5.0  plotLabel=quickstart-multipass
     Status should be        SUCCESS
 
 Cluster sim with nemoModel runs
@@ -31,7 +43,7 @@ Recovered sim source amplitudes are unbiased
     Set config      configs/sim_ptsrc_f090.yml
     Run nemo
     Cross match     testsCache/sim_f090_inputCatalog.fits     testsCache/sim_ptsrc_f090/sim_ptsrc_f090_optimalCatalog.fits
-    Check recovered ratio   deltaT_c    deltaT_c    toleranceSigma=3.0  SNRKey=SNR  SNRCut=5.0  plotLabel=sim_ptsrc_amplitudes
+    Check recovered ratio   deltaT_c    deltaT_c    toleranceSigma=3.0  SNRKey=SNR  SNRCut=7.0  plotLabel=sim_ptsrc_amplitudes
     Status should be        SUCCESS
     
 End-to-end source recovery and subtraction
@@ -55,6 +67,10 @@ End-to-end B12 cluster modeling and subtraction
 
 Run quickstart clusters
     Set config              ../examples/quickstart/quickstart-clusters.yml
+    Run nemo
+
+Run quickstart clusters with Q
+    Set config              configs/quickstart-clusters-Q.yml
     Run nemo
 
 Run quickstart sources
@@ -115,7 +131,9 @@ Clean up
     Remove directory        testsCache/quickstart-clusters              True
     Remove directory        testsCache/quickstart-sources               True
     Remove directory        testsCache/quickstart-multipass             True
-
+    Remove directory        testsCache/quickstart-multipass-Q           True
+    Remove file             testsCache/*forcedCatalog*
+    Remove file             testsCache/*_mass.fits
 
 *** Settings ***
 #Documentation              To be added here

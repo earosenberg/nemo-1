@@ -68,7 +68,7 @@ def findObjects(filteredMapDict, threshold = 3.0, minObjPix = 3, rejectBorder = 
                     ringSegMap[np.equal(ringSegMap, ringIDs[i])]=-1*ringSegMap[np.equal(ringSegMap, ringIDs[i])]
         ringSegMap=np.array(np.less(ringSegMap, 0), dtype = int)
         ringMask=ringSegMap
-        filteredMapDict['surveyMask']=filteredMapDict['surveyMask']-ringMask
+        #filteredMapDict['flagMask']=filteredMapDict['flagMask']-ringMask
     else:
         ringMask=None
 
@@ -351,7 +351,7 @@ def measureFluxes(catalog, filteredMapDict, diagnosticsDir, photFilteredMapDict 
                     obj[prefix+"err_fluxJy"]=deltaTToJyPerSr(obj[prefix+'err_deltaT_c'], obsFreqGHz)*beamSolidAngle_nsr*1.e-9
 
 #------------------------------------------------------------------------------------------------------------
-def makeForcedPhotometryCatalog(filteredMapDict, inputCatalog, useInterpolator = True,
+def makeForcedPhotometryCatalog(filteredMapDict, inputCatalog, useInterpolator = True,\
                                 DS9RegionsPath = None):
     """Make a catalog on which we can do forced photometry at the locations of objects in it.
     

@@ -2,16 +2,15 @@
 following additional modules to be installed (currently used versions are given in
 brackets, later versions also probably work):
 
-* numpy (1.13.3)
+* numpy (1.19)
 * scipy (1.3.0)
 * matplotlib (2.1.1)
 * astLib (0.11.7)
-* `pixell <https://github.com/simonsobs/pixell/>`_ (0.6.3 or git version)
+* `pixell <https://github.com/simonsobs/pixell/>`_ (0.17 or later)
 * Pillow (5.1.0)
 * astropy (4.0)
-* Cython (0.24.1)
 * PyYAML (3.12)
-* `CCL <https://github.com/LSSTDESC/CCL>`_ (2.1 or later)
+* `CCL <https://github.com/LSSTDESC/CCL>`_ (3.0.0+)
 * mpi4py (3.0.0)
 * colorcet (1.0.0; https://github.com/bokeh/colorcet/releases)
 
@@ -21,8 +20,7 @@ The latest tagged version of **Nemo** can be installed using ``pip``:
 
    pip install nemo-sz
 
-Note that you will need to have ``cython`` and ``numpy`` installed already (for the moment).
-Other dependencies will be installed by ``pip``, except for ``pyccl`` and ``mpi4py``.
+Dependencies will be installed by ``pip``, except for ``pyccl`` and ``mpi4py``.
 
 You may also install using the standard ``setup.py`` script, e.g., as root:
 

@@ -17,6 +17,7 @@ if on_rtd is None:
     import pyccl as ccl
 from . import signals
 from . import catalogs
+from . import maps
 import pickle
 from scipy import interpolate
 from scipy import integrate
@@ -62,7 +63,8 @@ class MockSurvey(object):
     """
     def __init__(self, minMass, areaDeg2, zMin, zMax, H0, Om0, Ob0, sigma8, ns, zStep = 0.01, 
                  enableDrawSample = False, delta = 500, rhoType = 'critical', 
-                 transferFunction = 'boltzmann_camb', massFunction = 'Tinker08'):
+                 transferFunction = 'boltzmann_camb', massFunction = 'Tinker08',
+                 c_m_relation = 'Bhattacharya13'):
         """Create a MockSurvey object, for performing calculations of cluster counts or generating mock
         catalogs. The Tinker et al. (2008) halo mass function is used (hardcoded at present, but in 
         principle this can easily be swapped for any halo mass function supported by CCL).
@@ -88,7 +90,9 @@ class MockSurvey(object):
                 'boltzmann_camb').
             massFunction (:obj:`str`): Name of the mass function to use, currently either 'Tinker08' or
                 'Tinker10'. Mass function calculations are done by CCL.
-                
+            c_m_relation ('obj':`str`): Name of the concentration -- mass relation to assume, as understood by
+                CCL (this may be used internally for conversion between mass definitions, as needed).
+
         """
         
         if areaDeg2 == 0:
@@ -103,11 +107,8 @@ class MockSurvey(object):
         
         self.delta=delta
         self.rhoType=rhoType
-        if self.delta == 200:
-            c_m_relation='Bhattacharya13'
-        else:
-            c_m_relation=None
-        self.mdef=ccl.halos.MassDef(self.delta, self.rhoType, c_m_relation = c_m_relation)
+        self.c_m_relation=c_m_relation
+        self.mdef=ccl.halos.MassDef(self.delta, self.rhoType)
         self.transferFunction=transferFunction
         self.massFuncName=massFunction
         
@@ -128,7 +129,10 @@ class MockSurvey(object):
                                         self.log10M.max()+(self.log10M[1]-self.log10M[0])/2, len(self.log10M)+1)  
 
         # Below is needed for Q calc when not using M500c definition (for now at least)
-        self._M500cDef=ccl.halos.MassDef(500, "critical")
+        if self.delta != 500 and self.rhoType != 'critical':
+            self._M500cDef=ccl.halos.MassDef(500, "critical")
+            self._transToM500c=ccl.halos.mass_translator(mass_in = self.mdef, mass_out = self._M500cDef,
+                                                         concentration = self.c_m_relation)
 
         self.enableDrawSample=enableDrawSample
         self.update(H0, Om0, Ob0, sigma8, ns)
@@ -160,18 +164,16 @@ class MockSurvey(object):
             self.Ob0=Ob0
             self.sigma8=sigma8
             self.ns=ns
-            self.cosmoModel = ccl.Cosmology(Omega_c=Om0-Ob0,
-                                            Omega_b=Ob0,
-                                            h=0.01*H0,
-                                            sigma8=sigma8,
-                                            n_s=ns,
-                                            transfer_function=self.transferFunction)
+            self.cosmoModel=ccl.Cosmology(Omega_c=Om0-Ob0,
+                                          Omega_b=Ob0,
+                                          h=0.01*H0,
+                                          sigma8=sigma8,
+                                          n_s=ns,
+                                          transfer_function=self.transferFunction)
             if self.massFuncName == 'Tinker10':
-                self.mfunc=ccl.halos.MassFuncTinker10(self.cosmoModel,
-                                                      self.mdef)
+                self.mfunc=ccl.halos.MassFuncTinker10(mass_def = self.mdef)
             elif self.massFuncName == 'Tinker08':
-                self.mfunc=ccl.halos.MassFuncTinker08(self.cosmoModel,
-                                                      self.mdef)
+                self.mfunc=ccl.halos.MassFuncTinker08(mass_def = self.mdef)
 
             
     def update(self, H0, Om0, Ob0, sigma8, ns):
@@ -204,11 +206,8 @@ class MockSurvey(object):
                 interpLim_minLog10M500c=self.log10M.min()
                 interpLim_maxLog10M500c=self.log10M.max()
             else:
-                interpLim_minLog10M500c=np.log10(self.mdef.translate_mass(self.cosmoModel, self.M.min(), 
-                                                                          self.a[k], self._M500cDef))
-                interpLim_maxLog10M500c=np.log10(self.mdef.translate_mass(self.cosmoModel, self.M.max(), 
-                                                                          self.a[k], self._M500cDef))
-
+                interpLim_minLog10M500c=np.log10(self._transToM500c(self.cosmoModel, self.M.min(), self.a[k]))
+                interpLim_maxLog10M500c=np.log10(self._transToM500c(self.cosmoModel, self.M.max(), self.a[k]))
             zk=self.z[k]
             interpPoints=100
             fitM500s=np.power(10, np.linspace(interpLim_minLog10M500c, interpLim_maxLog10M500c, interpPoints))
@@ -250,8 +249,7 @@ class MockSurvey(object):
         """
 
         h=self.cosmoModel['h']
-        dndlnM=self.mfunc.get_mass_function(self.cosmoModel,
-                                            self.M, 1/(1+z)) / np.log(10) #/ h**3
+        dndlnM=self.mfunc(self.cosmoModel, self.M, 1/(1+z)) / np.log(10)
         dndM=dndlnM/self.M
         ngtm=integrate.cumtrapz(dndlnM[::-1], np.log(self.M), initial = 0)[::-1]
         
@@ -292,8 +290,7 @@ class MockSurvey(object):
             zShellMin=zRange[i]
             zShellMax=zRange[i+1]
             zShellMid=(zShellMax+zShellMin)/2.
-            dndlnM=self.mfunc.get_mass_function(self.cosmoModel, self.M,
-                                                1./(1+zShellMid)) * norm_mfunc
+            dndlnM=self.mfunc(self.cosmoModel, self.M, 1./(1+zShellMid)) * norm_mfunc
             dndM = dndlnM / self.M
             n=dndM * np.gradient(self.M)
             numberDensity.append(n)
@@ -357,20 +354,20 @@ class MockSurvey(object):
         return PLog10M
 
 
-    def drawSample(self, y0Noise, scalingRelationDict, QFit = None, wcs = None, photFilterLabel = None,
-                   tileName = None, SNRLimit = None, makeNames = False, z = None, numDraws = None,
-                   areaDeg2 = None, applySNRCut = False, applyPoissonScatter = True, 
-                   applyIntrinsicScatter = True, applyNoiseScatter = True,
-                   applyRelativisticCorrection = True, verbose = False):
+    def drawSample(self, y0Noise, scalingRelationDict, QFit = None, wcs = None, photFilterLabel = None,\
+                   tileName = None, SNRLimit = None, makeNames = False, z = None, numDraws = None,\
+                   areaDeg2 = None, applySNRCut = False, applyPoissonScatter = True,\
+                   applyIntrinsicScatter = True, applyNoiseScatter = True,\
+                   applyRelativisticCorrection = True, verbose = False, biasModel = None):
         """Draw a cluster sample from the mass function, generating mock y0~ values (called `fixed_y_c` in
         Nemo catalogs) by applying the given scaling relation parameters, and then (optionally) applying
         a survey selection function.
         
         Args:
             y0Noise (:obj:`float` or :obj:`np.ndarray`): Either a single number (if using e.g., a survey
-                average) or a noise map (2d array). A noise map must be provided here if you want the
-                output catalog to contain RA, dec coordinates (in addition, a WCS object must also be
-                provided - see below).
+                average), an RMS table (with columns 'areaDeg2' and 'y0RMS'), or a noise map (2d array).
+                A noise map must be provided here if you want the output catalog to contain RA, dec
+                coordinates (in addition, a WCS object must also be provided - see below).
             scalingRelationDict (:obj:`dict`): A dictionary containing keys 'tenToA0', 'B0', 'Mpivot',
                 'sigma_int' that describes the scaling relation between y0~ and mass (this is the
                 format of `massOptions` in Nemo .yml config files).
@@ -455,17 +452,46 @@ class MockSurvey(object):
         # NOTE: switched to using valid part of RMSMap here rather than areaMask - we need to fix the latter to same area
         # It isn't a significant issue though
         if type(y0Noise) == np.ndarray and y0Noise.ndim == 2:
+            # This generates even density RA, dec coords on the whole sky taking into account the projection
+            # Consequently, this is inefficient if fed individual tiles rather than a full sky noise map
+            assert(wcs is not None)
             RMSMap=y0Noise
-            ysInMask, xsInMask=np.where(RMSMap != 0)
-            coordIndices=np.random.randint(0, len(xsInMask), numClusters)
-            ys=ysInMask[coordIndices]
-            xs=xsInMask[coordIndices]
-            if wcs is not None:
-                RADecCoords=wcs.pix2wcs(xs, ys)
-                RADecCoords=np.array(RADecCoords)
-                RAs=RADecCoords[:, 0]
-                decs=RADecCoords[:, 1]
+            xsList=[]
+            ysList=[]
+            maxCount=10000
+            count=0
+            while(len(xsList) < numClusters):
+                count=count+1
+                if count > maxCount:
+                    raise Exception("Failed to generate enough random coords in %d iterations" % (maxCount))
+                theta=np.degrees(np.pi*2*np.random.uniform(0, 1, numClusters))
+                phi=np.degrees(np.arccos(2*np.random.uniform(0, 1, numClusters)-1))-90
+                xyCoords=np.array(wcs.wcs2pix(theta, phi))
+                xs=np.array(np.round(xyCoords[:, 0]), dtype = int)
+                ys=np.array(np.round(xyCoords[:, 1]), dtype = int)
+                mask=np.logical_and(np.logical_and(xs >= 0, xs < RMSMap.shape[1]), np.logical_and(ys >= 0, ys < RMSMap.shape[0]))
+                xs=xs[mask]
+                ys=ys[mask]
+                mask=RMSMap[ys, xs] > 0
+                xsList=xsList+xs[mask].tolist()
+                ysList=ysList+ys[mask].tolist()
+            xs=np.array(xsList)[:numClusters]
+            ys=np.array(ysList)[:numClusters]
+            del xsList, ysList
+            RADecCoords=wcs.pix2wcs(xs, ys)
+            RADecCoords=np.array(RADecCoords)
+            RAs=RADecCoords[:, 0]
+            decs=RADecCoords[:, 1]
             y0Noise=RMSMap[ys, xs]
+        elif type(y0Noise) == atpy.Table:
+            noisetck=interpolate.splrep(np.cumsum(y0Noise['areaDeg2']/y0Noise['areaDeg2'].sum()), y0Noise['y0RMS'], k = 1)
+            rnd=np.random.uniform(0, 1, numClusters)
+            vals=interpolate.splev(rnd, noisetck, ext = 3)
+            if np.any(vals < 0) or np.any(vals == np.nan):
+                raise Exception("Failed to make interpolating spline for RMSTab in tileName = %s" % (tileName))
+            y0Noise=vals
+            RAs=np.zeros(numClusters)
+            decs=np.zeros(numClusters)
         else:
             y0Noise=np.ones(numClusters)*y0Noise
             RAs=np.zeros(numClusters)
@@ -525,9 +551,7 @@ class MockSurvey(object):
             if self.delta == 500 and self.rhoType == "critical":
                 log10M500cs[mask]=log10Ms[mask]
             else:
-                log10M500cs[mask]=np.log10(self.mdef.translate_mass(self.cosmoModel, np.power(10, log10Ms[mask]),
-                                                                1/(1+zk), self._M500cDef))
-
+                log10M500cs[mask]=np.log10(self._transToM500c(self.cosmoModel, np.power(10, log10Ms[mask]), 1/(1+zk)))
             theta500s=interpolate.splev(log10M500cs[mask], self.theta500Splines[k], ext = 3)
             if QFit is not None:
                 Qs[mask]=QFit.getQ(theta500s, z = zk, tileName = tileName)
@@ -579,8 +603,15 @@ class MockSurvey(object):
             tab.add_column(atpy.Column(true_y0s/1e-4, 'true_fixed_y_c'))
             tab.add_column(atpy.Column(measured_y0s/1e-4, 'fixed_y_c'))
             tab.add_column(atpy.Column(y0Noise/1e-4, 'fixed_err_y_c'))
+            tab['true_fixed_SNR']=tab['true_fixed_y_c']/tab['fixed_err_y_c']  # True truth, but pre-intrinsic and measurement scatter
+            # tab['true_fixed_SNR']=(scattered_y0s/1e-4)/tab['fixed_err_y_c']     # With intrinsic scatter, no measurement scatter
+            # tab['true_fixed_SNR']=tab['fixed_y_c']/tab['fixed_err_y_c']         # Like forced photometry case on a real map at true location
+            # Apply optimization bias first, then it'll feed through to SNR automatically
+            if biasModel is not None:
+                corrFactors=biasModel['func'](tab['true_fixed_SNR'], biasModel['params'][0], biasModel['params'][1], biasModel['params'][2])
+                tab['fixed_y_c']=tab['fixed_y_c']*corrFactors
+            tab['fixed_SNR']=tab['fixed_y_c']/tab['fixed_err_y_c']
 
-        tab.add_column(atpy.Column(measured_y0s/y0Noise, 'fixed_SNR'))
         tab.add_column(atpy.Column(zs, 'redshift'))
         tab.add_column(atpy.Column(zErrs, 'redshiftErr'))
         if photFilterLabel is not None and tileName is not None:
@@ -589,7 +620,7 @@ class MockSurvey(object):
                 
         # Apply selection?
         if applySNRCut == True:
-            selMask=measured_y0s > y0Noise*SNRLimit
+            selMask=tab['fixed_SNR'] > tab['fixed_err_y_c']*SNRLimit
             tab=tab[selMask]
         t1=time.time()
 

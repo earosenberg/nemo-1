@@ -89,7 +89,7 @@ def addForcedPhotometry(pathToCatalog, config, zColumnName = None, zErrColumnNam
         if mapFilter['label'] == config.parDict['photFilter']:
             trimmedList.append(mapFilter)
     config.parDict['mapFilters']=trimmedList
-    forcedTab=pipelines.filterMapsAndMakeCatalogs(config)
+    forcedTab=pipelines.filterMapsAndMakeCatalogs(config, useCachedFilteredMaps = True)
 
     # Need to graft the redshifts back on
     zMatched, forcedMatched, rDeg=catalogs.crossMatch(zTab, forcedTab)
@@ -105,11 +105,7 @@ def calcMass(tab, massOptions, QFit, fRelWeightsDict, mockSurvey, otherMassEstim
     
     """
 
-    try:
-        refMassDef=ccl.halos.MassDef(massOptions['delta'], massOptions['rhoType'],
-                                     c_m_relation = massOptions['concMassRelation'])
-    except:
-        refMassDef=ccl.halos.MassDef(massOptions['delta'], massOptions['rhoType'])
+    refMassDef=ccl.halos.MassDef(massOptions['delta'], massOptions['rhoType'])
 
     if 'relativisticCorrection' not in massOptions.keys():
         massOptions['relativisticCorrection']=True
@@ -209,11 +205,9 @@ def calcMass(tab, massOptions, QFit, fRelWeightsDict, mockSurvey, otherMassEstim
                     if 'concMassRelation' not in massDefDict.keys():
                         massDefDict['concMassRelation']=None
                     thisLabel='M%d%s' % (massDefDict['delta'], massDefDict['rhoType'][0])
-                    try:
-                        thisMassDef=ccl.halos.MassDef(massDefDict['delta'], massDefDict['rhoType'], c_m_relation = massDefDict['concMassRelation'])
-                    except:
-                        thisMassDef=ccl.halos.MassDef(massDefDict['delta'], massDefDict['rhoType'])
-                    thisMass=signals.MDef1ToMDef2(resultDict[label]*1e14, row['redshift'], refMassDef, thisMassDef, mockSurvey.cosmoModel)/1e14
+                    thisMassDef=ccl.halos.MassDef(massDefDict['delta'], massDefDict['rhoType'])
+                    thisMass=signals.MDef1ToMDef2(resultDict[label]*1e14, row['redshift'], refMassDef, thisMassDef, mockSurvey.cosmoModel,
+                                                  c_m_relation = massDefDict['concMassRelation'])/1e14
                     row[thisLabel+suffix]=thisMass
                     row[thisLabel+suffix+'_errPlus']=(row[label+suffix+'_errPlus']/row[label+suffix])*row[thisLabel+suffix]
                     row[thisLabel+suffix+'_errMinus']=(row[label+suffix+'_errMinus']/row[label+suffix])*row[thisLabel+suffix]
@@ -235,8 +229,10 @@ def makeParser():
                         (.fits format). If not given, the name of the output catalog file will be based on\
                         either configFileName or catFileName.", default = None)
     parser.add_argument("-Q", "--Q-source", dest="QSource", help = "Source of the Q function data - either\
-                        'fit' (the 'classic' method) or 'injection' (for Q based on source injection test\
-                        results.", default = 'fit')
+                        'fit' (the 'classic' method), 'injection' (for Q based on source injection test\
+                        results), or 'hybrid' (uses the 'fit' method for scales smaller than the reference\
+                        filter scale, and the 'injection' method for scales larger than the reference filter\
+                        scale).", default = 'fit')
     parser.add_argument("-x", "--x-match-arcmin", dest="xMatchArcmin", default = 2.5,
                         help = "Specifies the cross-match radius (in arcmin) to use when matching the redshift\
                         catalog onto the cluster candidate catalog.")
@@ -273,8 +269,8 @@ if __name__ == '__main__':
     outFileName=args.outFileName
     forcedPhotometry=args.forcedPhotometry
     QSource=args.QSource
-    if QSource not in ['fit', 'injection']:
-        raise Exception("QSource must be either 'fit' or 'injection'")
+    if QSource not in ['fit', 'injection', 'hybrid']:
+        raise Exception("QSource must be either 'fit', 'injection', or 'hybrid'")
     
     if args.noStrictMPIExceptions == True:
         strictMPIExceptions=False
@@ -320,7 +316,7 @@ if __name__ == '__main__':
             if key not in tab.keys():
                 forcedPhotometry=True
         config=startUp.NemoConfig(parDictFileName, MPIEnabled = args.MPIEnabled, divideTilesByProcesses = False,
-                                  setUpMaps = forcedPhotometry, writeTileDir = False, verbose = False,
+                                  setUpMaps = forcedPhotometry, writeTileInfo = False, verbose = False,
                                   strictMPIExceptions = strictMPIExceptions)
     
     # Remaining set-up
@@ -360,8 +356,6 @@ if __name__ == '__main__':
     mockSurvey=MockSurvey.MockSurvey(minMass, areaDeg2, zMin, zMax, H0, Om0, Ob0, sigma8, ns,
                                      rhoType = massOptions['rhoType'], delta = massOptions['delta'])
         
-    # Seems like multiprocessing doesn't work under slurm...   
-    # So use MPI instead: just divide up catalog among processes
     tab.add_column(atpy.Column(np.arange(len(tab)), "sortIndex"))
     if config.MPIEnabled == True:
         numRowsPerProcess=int(np.ceil(len(tab)/config.size))
@@ -370,7 +364,7 @@ if __name__ == '__main__':
         if config.rank == config.size-1:
             endIndex=len(tab)
         tab=tab[startIndex:endIndex]
-        
+
     tab=calcMass(tab, massOptions, Q, fRelWeightsDict, mockSurvey, otherMassEstimates = otherMassEstimates)
     
     if config.MPIEnabled == True:
@@ -390,6 +384,7 @@ if __name__ == '__main__':
     if outDir != '':
         os.makedirs(outDir, exist_ok = True)
     tab.meta['NEMOVER']=nemo.__version__
+    tab.meta['QSOURCE']=QSource
     tab.write(outFileName, overwrite = True)
     
     # Detect if testing a mock catalog, and write some stats on recovered masses
