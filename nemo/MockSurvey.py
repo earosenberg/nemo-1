@@ -26,6 +26,45 @@ from scipy import stats
 from astLib import *
 import time
 
+from classy_sz import Class
+
+common_class_sz_settings = {
+                   'mass function' : 'T08M200c', 
+                   'hm_consistency': 0,
+                   'concentration parameter' : 'B13',
+                   'B':1.,
+
+                   'N_ncdm' : 1,
+                   'N_ur' : 2.0328,
+                   'm_ncdm' : 0.0,
+                   'T_ncdm' : 0.71611,
+    
+                   'z_min': 1.e-3, # chose a wide range 
+                   'z_max': 4., # chose a wide range 
+                   'redshift_epsrel': 1e-6,
+                   'redshift_epsabs': 1e-100,  
+    
+                   'M_min': 1e13, # chose a wide range 
+                   'M_max': 1e17, # chose a wide range 
+                   'mass_epsrel':1e-6,
+                   'mass_epsabs':1e-100,
+   
+                   'ndim_redshifts' :500,
+                   'ndim_masses' : 500,
+                   'n_m_dndlnM' : 500,
+                   'n_z_dndlnM' : 500,
+                   'HMF_prescription_NCDM': 1,
+                   'no_spline_in_tinker': 1,
+    
+    
+                   'use_m500c_in_ym_relation' : 0,
+                   'use_m200c_in_ym_relation' : 1,
+                   'y_m_relation' : 1,
+    
+                   'output': 'dndlnM,m500c_to_m200c,m200c_to_m500c',
+}
+
+
 #------------------------------------------------------------------------------------------------------------
 class MockSurvey(object):
     """An object that provides routines calculating cluster counts (using `CCL <https://ccl.readthedocs.io/en/latest/>`_) 
@@ -64,7 +103,7 @@ class MockSurvey(object):
     def __init__(self, minMass, areaDeg2, zMin, zMax, H0, Om0, Ob0, sigma8, ns, zStep = 0.01, 
                  enableDrawSample = False, delta = 500, rhoType = 'critical', 
                  transferFunction = 'boltzmann_camb', massFunction = 'Tinker08',
-                 c_m_relation = 'Bhattacharya13'):
+                 c_m_relation = 'Bhattacharya13',scalingRelationDict = None):
         """Create a MockSurvey object, for performing calculations of cluster counts or generating mock
         catalogs. The Tinker et al. (2008) halo mass function is used (hardcoded at present, but in 
         principle this can easily be swapped for any halo mass function supported by CCL).
@@ -139,6 +178,39 @@ class MockSurvey(object):
                                                          concentration = self.c_m_relation)
 
         self.enableDrawSample=enableDrawSample
+        
+        class_sz_cosmo_params = {
+        'Omega_b': Ob0,
+        'Omega_cdm':  Om0-Ob0,
+        'H0': H0,
+        'sigma8': sigma8,
+        'tau_reio':  0.0561, ## doesnt matter 
+        'n_s': ns,
+        }
+        
+        tenToA0, B0, Mpivot, sigma_int = [scalingRelationDict['tenToA0'], 
+                                          scalingRelationDict['B0'], 
+                                          scalingRelationDict['Mpivot'], 
+                                          scalingRelationDict['sigma_int']]
+        
+        class_sz_ym_params = {
+        'A_ym'  : tenToA0,
+        'B_ym'  : B0,
+        'C_ym' : 0.,
+        'sigmaM_ym' : sigma_int,
+        'm_pivot_ym_[Msun]' : Mpivot,   
+        }
+        
+        self.cosmo = Class()
+        self.cosmo.set(common_class_sz_settings)
+        self.cosmo.set(class_sz_cosmo_params)
+        self.cosmo.set(class_sz_ym_params)
+        # self.cosmo.compute_class_szfast()
+        
+        print('>>> class_sz computed')
+        print('>>> updating cosmological quantities')        
+        
+        
         self.update(H0, Om0, Ob0, sigma8, ns)
 
 
@@ -199,10 +271,19 @@ class MockSurvey(object):
         # For quick Q, fRel calc (these are in MockSurvey rather than SelFn as used by drawSample)
         self.theta500Splines=[]
         self.fRelSplines=[]
+        
         self.Ez=ccl.h_over_h0(self.cosmoModel,self.a)
         self.Ez2=np.power(self.Ez, 2)
         self.DAz=ccl.angular_diameter_distance(self.cosmoModel,self.a)
         self.criticalDensity=ccl.physical_constants.RHO_CRITICAL*(self.Ez*self.cosmoModel['h'])**2
+        
+#         self.Ez = np.vectorize(self.cosmo.Hubble)(self.z)/self.cosmo.Hubble(0.)
+#         self.Ez2 = np.power(self.Ez, 2)
+        
+#         self.DAz = np.vectorize(self.cosmo.get_chi)(self.z)/(1.+self.z)/self.cosmo.h()
+        
+#         self.criticalDensity = np.vectorize(self.cosmo.get_rho_crit_at_z)(self.z)*self.cosmo.h()**2        
+        
         for k in range(len(self.z)):
             # NOTE: Q fit uses theta500, as does fRel (hardcoded M500 - T relation in there)
             # This bit here may not be strictly necessary, since we don't need to map on to binning
@@ -218,11 +299,22 @@ class MockSurvey(object):
             interpLim_minLog10M500c=self.log10M.min()
             interpLim_maxLog10M500c=self.log10M.max()
             
+            interpLim_minLog10M = self.log10M.min() # this is m200c
+            interpLim_maxLog10M = self.log10M.max() # this is m200c            
+            
             zk=self.z[k]
             interpPoints=100
+            
             fitM500s=np.power(10, np.linspace(interpLim_minLog10M500c, interpLim_maxLog10M500c, interpPoints))
+
+#             fitM500s = np.power(10, np.linspace(interpLim_minLog10M, interpLim_maxLog10M, interpPoints))
+            
+#             fitM500s = np.vectorize(self.cosmo.get_m200c_to_m500c_at_z_and_M)(zk,fitM500s*self.cosmo.h())/self.cosmo.h() ## in Msun
+            
+
             fitTheta500s=np.zeros(len(fitM500s))
             fitFRels=np.zeros(len(fitM500s))
+            
             criticalDensity=self.criticalDensity[k]
             DA=self.DAz[k]
             Ez=self.Ez[k]
