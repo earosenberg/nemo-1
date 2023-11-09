@@ -28,42 +28,6 @@ import time
 
 from classy_sz import Class
 
-common_class_sz_settings = {
-                   'mass function' : 'T08M200c', 
-                   'hm_consistency': 0,
-                   'concentration parameter' : 'B13',
-                   'B':1.,
-
-                   'N_ncdm' : 1,
-                   'N_ur' : 2.0328,
-                   'm_ncdm' : 0.0,
-                   'T_ncdm' : 0.71611,
-    
-                   'z_min': 1.e-3, # chose a wide range 
-                   'z_max': 3.05, # chose a wide range 
-                   'redshift_epsrel': 1e-6,
-                   'redshift_epsabs': 1e-100,  
-    
-                   'M_min': 1e13, # chose a wide range 
-                   'M_max': 1e17, # chose a wide range 
-                   'mass_epsrel':1e-6,
-                   'mass_epsabs':1e-100,
-   
-                   'ndim_redshifts' :5000,
-                   'ndim_masses' : 500,
-                   'n_m_dndlnM' : 1000,
-                   'n_z_dndlnM' : 1000,
-                   'HMF_prescription_NCDM': 1,
-                   'no_spline_in_tinker': 1,
-    
-    
-                   'use_m500c_in_ym_relation' : 0,
-                   'use_m200c_in_ym_relation' : 1,
-                   'y_m_relation' : 1,
-    
-                   'output': 'dndlnM,m500c_to_m200c,m200c_to_m500c',
-}
-
 
 #------------------------------------------------------------------------------------------------------------
 class MockSurvey(object):
@@ -107,7 +71,8 @@ class MockSurvey(object):
                  zMin, 
                  zMax, 
                  H0, Om0, Ob0, sigma8, ns,
-                 scalingRelationDict = None):
+                 scalingRelationDict = None,
+                 config = None):
         """Create a MockSurvey object, for performing calculations of cluster counts or generating mock
         catalogs. The Tinker et al. (2008) halo mass function is used (hardcoded at present, but in 
         principle this can easily be swapped for any halo mass function supported by CCL).
@@ -152,7 +117,6 @@ class MockSurvey(object):
         'Omega_cdm':  Om0-Ob0,
         'H0': H0,
         'sigma8': sigma8,
-        'tau_reio':  0.0561, ## doesnt matter 
         'n_s': ns,
         }
         
@@ -169,10 +133,12 @@ class MockSurvey(object):
         'm_pivot_ym_[Msun]' : Mpivot,   
         }
         #BB
+        
+        class_sz_common_settings = config['class_sz']['class_sz_common_settings']
 
 
         self.cosmo = Class()
-        self.cosmo.set(common_class_sz_settings)
+        self.cosmo.set(class_sz_common_settings)
         self.cosmo.set(class_sz_cosmo_params)
         self.cosmo.set(class_sz_ym_params)
         self.cosmo.compute_class_szfast()
@@ -188,8 +154,8 @@ class MockSurvey(object):
         m200_min = minMass*self.cosmo.h() 
         m200_max = maxMass*self.cosmo.h() 
 
-        nms = 20000 # default : 20000
-        nzs = 10000 # default : 10000
+        nms = config['class_sz']['nms'] 
+        nzs = config['class_sz']['nzs'] 
 
         lnms = np.linspace(np.log(m200_min),np.log(m200_max),nms)
         zs = np.linspace(z_min,z_max,nzs)

@@ -29,9 +29,17 @@ from . import completeness
 from . import MockSurvey
 
 #------------------------------------------------------------------------------------------------------------
-def filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = False, useCachedRMSMap = False,\
-                              useCachedFilteredMaps = False, measureFluxes = True, invertMap = False, \
-                              verbose = True, writeAreaMask = False, writeFlagMask = False):
+def filterMapsAndMakeCatalogs(config, 
+                              rootOutDir = None,
+                              useCachedFilters = False, 
+                              useCachedRMSMap = False,\
+                              useCachedFilteredMaps = False, 
+                              measureFluxes = True, 
+                              invertMap = False, \
+                              verbose = True, 
+                              writeAreaMask = False, 
+                              writeFlagMask = False,
+                              cosmoModel = None):
     """Runs the map filtering and catalog construction steps according to the given configuration.
     
     Args:
@@ -74,7 +82,8 @@ def filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fals
                                                                                   useCachedFilters = False,
                                                                                   useCachedFilteredMaps = False,
                                                                                   writeAreaMask = writeAreaMask,
-                                                                                  writeFlagMask = writeFlagMask)
+                                                                                  writeFlagMask = writeFlagMask,
+                                                                                  cosmoModel = cosmoModel)
 
             if config.filterSetOptions[setNum]['addSiphonedFromSets'] is not None:
                 toStack=[config.filterSetOptions[setNum]['catalog']]
@@ -96,11 +105,17 @@ def filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fals
 
     else:
         # Default single pass behaviour (also used by source injection tests)
-        catalog=_filterMapsAndMakeCatalogs(config, rootOutDir = rootOutDir, useCachedFilters = useCachedFilters,
+        catalog=_filterMapsAndMakeCatalogs(config, 
+                                           rootOutDir = rootOutDir, 
+                                           useCachedFilters = useCachedFilters,
                                            useCachedFilteredMaps = useCachedFilteredMaps,
-                                           useCachedRMSMap = useCachedRMSMap, measureFluxes = measureFluxes,
-                                           invertMap = invertMap, verbose = verbose,
-                                           writeAreaMask = writeAreaMask, writeFlagMask = writeFlagMask)
+                                           useCachedRMSMap = useCachedRMSMap, 
+                                           measureFluxes = measureFluxes,
+                                           invertMap = invertMap, 
+                                           verbose = verbose,
+                                           writeAreaMask = writeAreaMask, 
+                                           writeFlagMask = writeFlagMask,
+                                           cosmoModel = cosmoModel)
 
     if verbose == True and config.rank == 0:
         print("... after map filtering and making catalogs: time since start = %.3f sec" % (time.time()-config._timeStarted))
@@ -108,9 +123,16 @@ def filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fals
     return catalog
 
 #------------------------------------------------------------------------------------------------------------
-def _filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = False, useCachedRMSMap = False,\
-                               useCachedFilteredMaps = False, measureFluxes = True, invertMap = False, \
-                               verbose = True, writeAreaMask = False, writeFlagMask = False):
+def _filterMapsAndMakeCatalogs(config, 
+                               rootOutDir = None, 
+                               useCachedFilters = False, 
+                               useCachedRMSMap = False,\
+                               useCachedFilteredMaps = False, 
+                               measureFluxes = True, 
+                               invertMap = False, \
+                               verbose = True, writeAreaMask = False, 
+                               writeFlagMask = False,
+                               cosmoModel = None):
     """Runs the map filtering and catalog construction steps according to the given configuration.
     
     Args:
@@ -207,11 +229,18 @@ def _filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fal
                 filteredMapDict['label']=f['label']
                 filteredMapDict['tileName']=tileName
             else:
-                filteredMapDict=filters.filterMaps(config.unfilteredMapsDictList, f, tileName,
-                                                   diagnosticsDir = config.diagnosticsDir, selFnDir = config.selFnDir,
-                                                   verbose = True, undoPixelWindow = undoPixelWindow,
-                                                   useCachedFilter = useCachedFilters)
-
+                filteredMapDict=filters.filterMaps(config.unfilteredMapsDictList, 
+                                                   f, 
+                                                   tileName,
+                                                   diagnosticsDir = config.diagnosticsDir, 
+                                                   selFnDir = config.selFnDir,
+                                                   verbose = True, 
+                                                   undoPixelWindow = undoPixelWindow,
+                                                   useCachedFilter = useCachedFilters,
+                                                   cosmoModel = cosmoModel)
+                
+            filteredMapDict['T_cmb'] = cosmoModel.T_cmb()
+                
             if useCachedRMSMap == True and photFilter is not None: # i.e., only an option for cluster insertion sims
                 # This is messy:
                 # 1. the saved RMS map doesn't have pixel window correction undone
@@ -247,7 +276,8 @@ def _filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fal
                                                                DS9RegionsPath = DS9RegionsPath)
             else:
                 # Normal mode
-                catalog=photometry.findObjects(filteredMapDict, threshold = config.parDict['thresholdSigma'], 
+                catalog=photometry.findObjects(filteredMapDict, 
+                                               threshold = config.parDict['thresholdSigma'], 
                                                minObjPix = config.parDict['minObjPix'], 
                                                findCenterOfMass = config.parDict['findCenterOfMass'],
                                                removeRings = config.parDict['removeRings'],
@@ -285,7 +315,7 @@ def _filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fal
             catalogDict[label]['catalog']=catalog
 
     # Merged/optimal catalogs
-    optimalCatalog=catalogs.makeOptimalCatalog(catalogDict, constraintsList = config.parDict['catalogCuts'])
+    optimalCatalog = catalogs.makeOptimalCatalog(catalogDict, constraintsList = config.parDict['catalogCuts'])
     
     if config.MPIEnabled == True:
         # area mask
@@ -293,11 +323,14 @@ def _filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fal
             #config.comm.barrier()
             if config.rank > 0:
                 config.comm.send(areaMaskDict, dest = 0)
+                
             elif config.rank == 0:
+                
                 gathered_tileDicts=[]
                 gathered_tileDicts.append(areaMaskDict)
                 for source in range(1, config.size):
                     gathered_tileDicts.append(config.comm.recv(source = source))
+                    
                 print("... gathered area mask")
                 for tileDict in gathered_tileDicts:
                     for tileName in tileDict.keys():
@@ -312,34 +345,47 @@ def _filterMapsAndMakeCatalogs(config, rootOutDir = None, useCachedFilters = Fal
                 gathered_tileDicts.append(flagMaskDict)
                 for source in range(1, config.size):
                     gathered_tileDicts.append(config.comm.recv(source = source))
+                    
                 print("... gathered flag mask")
                 for tileDict in gathered_tileDicts:
                     for tileName in tileDict.keys():
                         flagMaskDict[tileName]=tileDict[tileName]
 
         # catalogs - every node now gets the whole catalog, for running in multipass mode
-        optimalCatalogList=config.comm.allgather(optimalCatalog)
+        optimalCatalogList = config.comm.allgather(optimalCatalog)
+        
         if config.rank == 0: print("... gathered catalogs")
+        
         toStack=[]  # We sometimes return [] if no objects found - we can't vstack those
+        
         for collectedTab in optimalCatalogList:
+            
             if type(collectedTab) == astropy.table.table.Table and len(collectedTab) > 0:
                 toStack.append(collectedTab)
+                
         optimalCatalog=atpy.vstack(toStack)
+        
         # Strip out duplicates (this is necessary when run in tileDir mode under MPI)
         if len(optimalCatalog) > 0:
             optimalCatalog, numDuplicatesFound, names=catalogs.removeDuplicates(optimalCatalog)
 
     # Write masks - MEFs [barrier here because needed for next step]
     if config.rank == 0:
+        
         if writeAreaMask == True:
+            
             areaMaskDict.saveMEF(config.selFnDir+os.path.sep+"areaMask.fits", compressionType = 'PLIO_1')
+            
         if writeFlagMask == True:
+            
             flagMaskDict.saveMEF(config.selFnDir+os.path.sep+"flagMask.fits", compressionType = 'PLIO_1')
+            
     if config.MPIEnabled == True:
         config.comm.barrier()
 
     # Write masks - stitched [done by rank 0 while processesothers move on]
     if config.rank == 0:
+        
         if writeAreaMask == True and config.parDict['stitchTiles'] == True:
             areaMaskDict.saveStitchedFITS(config.selFnDir+os.path.sep+"stitched_areaMask.fits",
                                           config.origWCS, compressionType = 'PLIO_1')

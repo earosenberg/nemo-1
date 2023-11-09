@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-
+#!/mnt/ceph/users/bbolliet/tsz_likelihood/pyvenv/tsz_likelihood_mpi/bin/python
 """
 
 Make a map containing model objects using the info in a nemo output catalog
@@ -15,9 +14,8 @@ from astLib import *
 from nemo import startUp, maps, catalogs, signals
 import argparse
 import astropy.io.fits as pyfits
-on_rtd=os.environ.get('READTHEDOCS', None)
-if on_rtd is None:
-    import pyccl as ccl
+from classy_sz import Class
+import yaml
 
 #------------------------------------------------------------------------------------------------------------
 def makeParser():
@@ -35,10 +33,15 @@ def makeParser():
                         area. Non-zero values in the mask are used to define tiles (typically 10 x 5 deg),\
                         which are processed in parallel if MPI is enabled (see -M switch). The output sky\
                         model image will have the same pixelization as the mask image.")
+                        
     parser.add_argument("beamFileName", help = "A file containing the beam profile, in the standard format\
                         used by ACT.")
+
+    parser.add_argument("configFileName", help = "A file containing the sims config.")
+
     parser.add_argument("outputFileName", help = "The name of the output file that will contain the sky\
                         model image.")
+                        
     parser.add_argument("-f", "--frequency-GHz", dest = "obsFreqGHz", type = float, default = 150.0,
                         help = "If the nemo catalog contains SZ-selected clusters, the SZ signal will be\
                         evaluted at the given frequency, ignoring relativistic effects (default: 150.0).")
@@ -189,20 +192,32 @@ if __name__ == '__main__':
     else:
         tab=atpy.Table().read(args.catalog)
 
-    # Optionally override the fiducial cosmology (only useful for cluster sims)
-    keywords=['OM0', 'OB0', 'H0', 'SIGMA8', 'NS']
-    keyCount=0
-    for key in keywords:
-        if key in tab.meta.keys():
-            keyCount=keyCount+1
-    if keyCount == len(keywords):
-        print(">>> Using cosmology specified in header for catalog %s [only affects painted cluster sizes]" % (args.catalog))
-        cosmoModel=ccl.Cosmology(Omega_c = tab.meta['OM0']-tab.meta['OB0'], Omega_b = tab.meta['OB0'],
-                                 h = 0.01*tab.meta['H0'], sigma8 = tab.meta['SIGMA8'], n_s = tab.meta['NS'],
-                                 transfer_function = signals.transferFunction)
-    else:
-        print(">>> Using fiducial cosmology")
-        cosmoModel=signals.fiducialCosmoModel
+        
+    ## BB: compute the cosmological model with class_sz  
+    print(">> computing cosmology/hmf with class_sz")
+    config_file = args.configFileName
+    
+    with open(config_file, "r") as stream:
+        cat_config=yaml.safe_load(stream)
+    
+    class_sz_common_settings = cat_config['class_sz']['class_sz_common_settings']
+    
+    class_sz_cosmo_params = {
+    'Omega_b': tab.meta['OB0'],
+    'Omega_cdm':  tab.meta['OM0']-tab.meta['OB0'],
+    'H0': tab.meta['H0'],
+    'sigma8': tab.meta['SIGMA8'],
+    'n_s': tab.meta['NS'],
+    }    
+    cosmoModel = Class()
+    cosmoModel.set(class_sz_common_settings)
+    cosmoModel.set(class_sz_cosmo_params)
+
+    cosmoModel.compute_class_szfast()
+    
+    print(">> class_sz computed")
+    
+        
 
     # Optional signal scaling (useful for diff alpha sims)
     if 'y_c' in tab.keys():
@@ -217,23 +232,18 @@ if __name__ == '__main__':
                config.tileCoordsDict[tileName]['clippedSection'][1]-config.tileCoordsDict[tileName]['clippedSection'][0])
         wcs=astWCS.WCS(config.tileCoordsDict[tileName]['header'], mode = 'pyfits')
         try:
-            modelsDict[tileName]=maps.makeModelImage(shape, wcs, tab, args.beamFileName,
+            modelsDict[tileName]=maps.makeModelImage(shape, 
+                                                     wcs, 
+                                                     tab, 
+                                                     args.beamFileName,
                                                      obsFreqGHz = args.obsFreqGHz,
                                                      validAreaSection = config.tileCoordsDict[tileName]['areaMaskInClipSection'],
                                                      TCMBAlpha = args.TCMBAlpha,
-                                                     profile = args.profile, cosmoModel = cosmoModel)
+                                                     profile = args.profile, 
+                                                     cosmoModel = cosmoModel)
         except:
             raise Exception("makeModelImage failed on tile '%s'" % (tileName))
 
-    # Gathering
-    #if config.MPIEnabled == True:
-        #config.comm.barrier()
-        #gathered_modelsDicts=config.comm.gather(modelsDict, root = 0)
-        #if config.rank == 0:
-            #print("... gathered sky model tiles ...")
-            #for tileModelDict in gathered_modelsDicts:
-                #for tileName in tileModelDict.keys():
-                    #modelsDict[tileName]=tileModelDict[tileName]
     
     # We can't just gather as that triggers a 32-bit overflow (?)
     # So, sending one object at a time

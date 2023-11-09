@@ -42,35 +42,16 @@ np.random.seed()
 
 #------------------------------------------------------------------------------------------------------------
 # Global constants (we could move others here but then need to give chunky obvious names, not just e.g. h)
-TCMB=2.72548
-Mpc_in_cm=constants.pc.value*100*1e6
-MSun_in_g=constants.M_sun.value*1000
+TCMB = None
+Mpc_in_cm = constants.pc.value*100*1e6
+MSun_in_g = constants.M_sun.value*1000
 
-# Default cosmology (e.g., for fitQ)
-#fiducialCosmoModel=FlatLambdaCDM(H0 = 70.0, Om0 = 0.3, Ob0 = 0.05, Tcmb0 = TCMB)
 
-# Default cosmology (e.g., for fitQ) - now based on CCL rather than astropy
-Om0=0.3
-Ob0=0.05
-H0=70
-sigma8=0.8
-ns=0.95
-transferFunction="boltzmann_camb"
-on_rtd=os.environ.get('READTHEDOCS', None)
-if on_rtd is None:
-    import pyccl as ccl
-    fiducialCosmoModel=ccl.Cosmology(Omega_c=Om0-Ob0, Omega_b=Ob0, h=0.01*H0, sigma8=sigma8, n_s=ns,
-                                    transfer_function=transferFunction)
+fiducialCosmoModel=None
+M200mDef=None
+M200cDef=None
+M500cDef=None
 
-    # For CCL-based mass conversions
-    M200mDef=ccl.halos.MassDef(200, "matter")
-    M200cDef=ccl.halos.MassDef(200, "critical")
-    M500cDef=ccl.halos.MassDef(500, "critical")
-else:
-    fiducialCosmoModel=None
-    M200mDef=None
-    M200cDef=None
-    M500cDef=None
 
 #------------------------------------------------------------------------------------------------------------
 class BeamProfile(object):
@@ -341,7 +322,10 @@ class QFit(object):
         return Qs
 
 #------------------------------------------------------------------------------------------------------------
-def fSZ(obsFrequencyGHz, TCMBAlpha = 0.0, z = None):
+def fSZ(obsFrequencyGHz, 
+        TCMBAlpha = 0.0, 
+        z = None, 
+        T_cmb = 2.7255):
     """Returns the frequency dependence of the (non-relativistic) Sunyaev-Zel'dovich effect.
     
     Args:
@@ -360,7 +344,7 @@ def fSZ(obsFrequencyGHz, TCMBAlpha = 0.0, z = None):
     sigmaT=constants.sigma_T.value
     me=constants.m_e.value
     c=constants.c.value
-    x=(h*obsFrequencyGHz*1e9)/(kB*TCMB)
+    x=(h*obsFrequencyGHz*1e9)/(kB*T_cmb)
     if TCMBAlpha != 0 and z is not None:
         assert(z >= 0)
         x=x*np.power(1+z, TCMBAlpha)
@@ -375,7 +359,7 @@ def calcRDeltaMpc(z, MDelta, cosmoModel, delta = 500, wrt = 'critical'):
     Args:
         z (float): Redshift.
         MDelta (float): Halo mass in units of solar masses, using the definition set by `delta` and `wrt`.
-        cosmoModel (:obj:`pyccl.Cosmology`): Cosmology object.
+        cosmoModel (:obj:`class_sz`): Cosmology object.
         delta (float, optional): Overdensity (e.g., typically 500 or 200).
         wrt (str, optional): Use 'critical' or 'mean' to set the definition of density with respect to the
             critical density or mean density at the given redshift.
@@ -384,18 +368,10 @@ def calcRDeltaMpc(z, MDelta, cosmoModel, delta = 500, wrt = 'critical'):
         RDelta (in Mpc)
     
     """
-
-    if type(MDelta) == str:
-        raise Exception("MDelta is a string - use, e.g., 1.0e+14 (not 1e14 or 1e+14)")
-
-    Ez=ccl.h_over_h0(cosmoModel, 1/(1+z))
-    if wrt == 'critical':
-        wrtDensity=ccl.physical_constants.RHO_CRITICAL*(Ez*cosmoModel['h'])**2
-    elif wrt == 'mean':
-        wrtDensity=ccl.omega_x(cosmoModel, 1/(1+z), 'matter')*ccl.physical_constants.RHO_CRITICAL*(Ez*cosmoModel['h'])**2
-    else:
-        raise Exception("wrt should be either 'critical' or 'mean'")
-    RDeltaMpc=np.power((3*MDelta)/(4*np.pi*delta*wrtDensity), 1.0/3.0)
+    
+    m_asked = MDelta*cosmoModel.h() #msun/h
+    z_asked = z
+    RDeltaMpc = cosmoModel.get_r_delta_of_m_delta_at_z(delta,m_asked,z_asked)/cosmoModel.h() ## BB class_sz way
         
     return RDeltaMpc
 
@@ -406,16 +382,17 @@ def calcR500Mpc(z, M500c, cosmoModel):
     Args:
         z (float): Redshift.
         M500c (float): Mass within R500c (i.e., with respect to critical density) in units of solar masses.
-        cosmoModel (`:obj:`pyccl.Cosmology`): Cosmology object.
+        cosmoModel (`:obj:`class_sz`): Cosmology object.
     
     Returns:
         R500c (in Mpc)
     
     """
     
-    R500Mpc=calcRDeltaMpc(z, M500c, cosmoModel, delta = 500, wrt = 'critical')
-    ## BB do everything at 200c
-    R500Mpc=calcRDeltaMpc(z, M500c, cosmoModel, delta = 200, wrt = 'critical')    
+    m_asked = M500c*cosmoModel.h()  #msun/h
+    z_asked = z
+    R500Mpc = cosmoModel.get_r_delta_of_m_delta_at_z(500,m_asked,z_asked)/cosmoModel.h() ## BB class_sz way
+  
     return R500Mpc
 
 #------------------------------------------------------------------------------------------------------------
@@ -426,7 +403,7 @@ def calcTheta500Arcmin(z, M500, cosmoModel):
     Args:
         z (float): Redshift.
         M500 (float): Mass within R500c (i.e., with respect to critical density) in units of solar masses.
-        cosmoModel (`:obj:`pyccl.Cosmology`): Cosmology object.
+        cosmoModel (`:obj:`class_sz`): Cosmology object.
     
     Returns:
         theta500c (in arcmin)
@@ -434,8 +411,8 @@ def calcTheta500Arcmin(z, M500, cosmoModel):
     """
     
     R500Mpc=calcR500Mpc(z, M500, cosmoModel)
-    #theta500Arcmin=np.degrees(np.arctan(R500Mpc/cosmoModel.angular_diameter_distance(z).value))*60.0
-    theta500Arcmin=np.degrees(np.arctan(R500Mpc/ccl.angular_diameter_distance(cosmoModel, 1/(1+z))))*60.0
+    angular_diameter_distance = cosmoModel.get_chi(z)/(1.+z)/cosmoModel.h()
+    theta500Arcmin=np.degrees(np.arctan(R500Mpc/angular_diameter_distance))*60.0
     
     return theta500Arcmin
     
@@ -862,7 +839,10 @@ def loadFRelWeights(fRelWeightsFileName):
     return fRelWeightsDict
 
 #------------------------------------------------------------------------------------------------------------
-def fitQ(config):
+
+### BB : this function is used in the driver script bin/nemo
+def fitQ(config,
+         cosmoModel = fiducialCosmoModel):
     """Calculates the filter mismatch function *Q* on a grid of scale sizes for each tile in the map. The
     results are combined into a single file written under the `selFn` directory.
     
@@ -876,7 +856,7 @@ def fitQ(config):
         
     """
     
-    cosmoModel=fiducialCosmoModel
+    
         
     # Spin through the filter kernels
     photFilterLabel=config.parDict['photFilter']
@@ -890,10 +870,10 @@ def fitQ(config):
     # We add a header keyword to the QFit.fits table to indicate if z-dependence important or not
     # Everything is then handled internally by QFit class
     if ref['class'].find("Arnaud") != -1:
-        makeSignalModelMap=makeArnaudModelSignalMap
+        makeSignalModelMap = makeArnaudModelSignalMap
         zDepQ=0
     elif ref['class'].find("Battaglia") != -1:
-        makeSignalModelMap=makeBattagliaModelSignalMap
+        makeSignalModelMap = makeBattagliaModelSignalMap
         zDepQ=1
     else:
         raise Exception("Signal model for Q calculation should either be 'Arnaud' or 'Battaglia'")
@@ -908,40 +888,31 @@ def fitQ(config):
         # theta500Arcmin_wanted=np.logspace(np.log10(0.1), np.log10(30), 50)
         # zRange_wanted=[2.0]*10 + [1.0]*10 + [0.6]*10 + [0.3]*10 + [0.1]*10
         # New - same spacing over same range, with some extra scales
-        theta500Arcmin_wanted=np.power(10, np.arange(np.log10(0.1), np.log10(50), 0.05055349))
-        zRange_wanted=[2.0]*10 + [1.0]*10 + [0.6]*10 + [0.3]*10 + [0.1]*10 + [0.07]*4
+        
+        theta500Arcmin_wanted = np.power(10, np.arange(np.log10(0.1), np.log10(50), 0.05055349))
+        
+        zRange_wanted = [2.0]*10 + [1.0]*10 + [0.6]*10 + [0.3]*10 + [0.1]*10 + [0.07]*4
+        
         MRange_wanted=[]
+        
         for theta500Arcmin, z in zip(theta500Arcmin_wanted, zRange_wanted):
-            Ez=ccl.h_over_h0(cosmoModel, 1/(1+z))
-            criticalDensity=ccl.physical_constants.RHO_CRITICAL*(Ez*cosmoModel['h'])**2
-            R500Mpc=np.tan(np.radians(theta500Arcmin/60.0))*ccl.angular_diameter_distance(cosmoModel, 1/(1+z))
-            M500=(4/3.0)*np.pi*np.power(R500Mpc, 3)*500*criticalDensity
+            
+            Ez = cosmoModel.Hubble(z)/cosmoModel.Hubble(0.)
+            
+            criticalDensity = cosmoModel.get_rho_crit_at_z(z)*cosmoModel.h()**2
+            
+            angular_diameter_distance = cosmoModel.get_chi(z)/(1.+z)/cosmoModel.h()
+            
+            R500Mpc = np.tan(np.radians(theta500Arcmin/60.0))*angular_diameter_distance
+            
+            M500 = (4/3.0)*np.pi*np.power(R500Mpc, 3)*500*criticalDensity
+            
             MRange_wanted.append(M500)
+            
         MRange=MRange+MRange_wanted
         zRange=zRange+zRange_wanted
         signalMapSizeDeg=15.0
-        # Old
-        # minTheta500Arcmin=0.1
-        # maxTheta500Arcmin=500
-        # numPoints=50
-        # theta500Arcmin_wanted=np.logspace(np.log10(minTheta500Arcmin), np.log10(maxTheta500Arcmin), numPoints)
-        # zRange_wanted=np.zeros(numPoints)
-        # zRange_wanted[np.less(theta500Arcmin_wanted, 3.0)]=2.0
-        # zRange_wanted[np.logical_and(np.greater(theta500Arcmin_wanted, 3.0), np.less(theta500Arcmin_wanted, 6.0))]=1.0
-        # zRange_wanted[np.logical_and(np.greater(theta500Arcmin_wanted, 6.0), np.less(theta500Arcmin_wanted, 10.0))]=0.5
-        # zRange_wanted[np.logical_and(np.greater(theta500Arcmin_wanted, 10.0), np.less(theta500Arcmin_wanted, 20.0))]=0.1
-        # zRange_wanted[np.logical_and(np.greater(theta500Arcmin_wanted, 20.0), np.less(theta500Arcmin_wanted, 30.0))]=0.05
-        # zRange_wanted[np.greater(theta500Arcmin_wanted, 30.0)]=0.01
-        # MRange_wanted=[]
-        # for theta500Arcmin, z in zip(theta500Arcmin_wanted, zRange_wanted):
-        #     Ez=ccl.h_over_h0(cosmoModel, 1/(1+z))
-        #     criticalDensity=ccl.physical_constants.RHO_CRITICAL*(Ez*cosmoModel['h'])**2
-        #     R500Mpc=np.tan(np.radians(theta500Arcmin/60.0))*ccl.angular_diameter_distance(cosmoModel, 1/(1+z))
-        #     M500=(4/3.0)*np.pi*np.power(R500Mpc, 3)*500*criticalDensity
-        #     MRange_wanted.append(M500)
-        # MRange=MRange+MRange_wanted
-        # zRange=zRange+zRange_wanted.tolist()
-        # signalMapSizeDeg=15.0
+
     elif zDepQ == 1:
         # On a z grid for evolving profile models (e.g., Battaglia et al. 2012)
         MRange=[ref['params']['M500MSun']]
@@ -952,13 +923,23 @@ def fitQ(config):
         numPoints=24
         theta500Arcmin_wanted=np.logspace(np.log10(minTheta500Arcmin), np.log10(maxTheta500Arcmin), numPoints)
         for z in zGrid:
+            
             MRange_wanted=[]
+            
             for theta500Arcmin in theta500Arcmin_wanted:
-                Ez=ccl.h_over_h0(cosmoModel, 1/(1+z))
-                criticalDensity=ccl.physical_constants.RHO_CRITICAL*(Ez*cosmoModel['h'])**2
-                R500Mpc=np.tan(np.radians(theta500Arcmin/60.0))*ccl.angular_diameter_distance(cosmoModel, 1/(1+z))
-                M500=(4/3.0)*np.pi*np.power(R500Mpc, 3)*500*criticalDensity
+                
+                Ez = cosmoModel.Hubble(z)/cosmoModel.Hubble(0.)
+
+                criticalDensity = cosmoModel.get_rho_crit_at_z(z)*cosmoModel.h()**2
+
+                angular_diameter_distance = cosmoModel.get_chi(z)/(1.+z)/cosmoModel.h()
+
+                R500Mpc = np.tan(np.radians(theta500Arcmin/60.0))*angular_diameter_distance
+
+                M500 = (4/3.0)*np.pi*np.power(R500Mpc, 3)*500*criticalDensity
+
                 MRange_wanted.append(M500)
+                
             MRange=MRange+MRange_wanted
             zRange=zRange+([z]*len(MRange_wanted))
         signalMapSizeDeg=15.0
@@ -1047,18 +1028,22 @@ def fitQ(config):
             y0=2e-04
             for obsFreqGHz in list(beamsDict.keys()):
                 if mapDict['obsFreqGHz'] is not None:   # Normal case
-                    amplitude=maps.convertToDeltaT(y0, obsFreqGHz)
+                    amplitude = maps.convertToDeltaT(y0, obsFreqGHz)
                 else:                                   # TILe-C case
-                    amplitude=y0
+                    amplitude = y0
                 # NOTE: Q is to adjust for mismatched filter shape
                 # Yes, this should have the beam in it (certainly for TILe-C)
-                # NOTE: CCL can blow up for some of the extreme masses we try to feed in here
-                # (so we just skip those if it happens)
                 # try:
-                signalMap=makeSignalModelMap(z, M500MSun, shape, wcs, beam = beamsDict[obsFreqGHz],
-                                             amplitude = amplitude, convolveWithBeam = True,
-                                             GNFWParams = config.parDict['GNFWParams'])
-                signalMap=enmap.apply_window(signalMap, pow = 1.0)
+                signalMap = makeSignalModelMap(z, 
+                                             M500MSun, 
+                                             shape, wcs, 
+                                             beam = beamsDict[obsFreqGHz],
+                                             amplitude = amplitude, 
+                                             convolveWithBeam = True,
+                                             GNFWParams = config.parDict['GNFWParams'],
+                                             cosmoModel = cosmoModel)
+                
+                signalMap = enmap.apply_window(signalMap, pow = 1.0)
                 # except:
                 #     continue
                 #signalMap=signalMap+simCMBDict[obsFreqGHz]
@@ -1079,8 +1064,11 @@ def fitQ(config):
                 # Below is if we wanted to simulate object-finding here
                 #peakFilteredSignal=filteredSignal[int(y)-10:int(y)+10, int(x)-10:int(x)+10].max() # Avoids mess at edges
                 if peakFilteredSignal not in Q:
+                    
                     Q.append(peakFilteredSignal)
-                    QTheta500Arcmin.append(calcTheta500Arcmin(z, M500MSun, fiducialCosmoModel))
+                    
+                    QTheta500Arcmin.append(calcTheta500Arcmin(z, M500MSun, cosmoModel))
+                    
                     Qz.append(z)
         Q=np.array(Q)
         if abs(1-Q[0]/y0) > 1e-6:
@@ -1251,7 +1239,7 @@ def y0FromLogM500(log10M500, z, tckQFit, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 
     """Predict y0~ given logM500 (in MSun) and redshift. Default scaling relation parameters are A10 (as in
     H13).
     
-    Use cosmoModel (:obj:`pyccl.Cosmology`) to change/specify cosmological parameters.
+    Use cosmoModel (:obj:`class_sz`) to change/specify cosmological parameters.
     
     fRelWeightsDict is used to account for the relativistic correction when y0~ has been constructed
     from multi-frequency maps. Weights should sum to 1.0; keys are observed frequency in GHz.
@@ -1267,26 +1255,17 @@ def y0FromLogM500(log10M500, z, tckQFit, tenToA0 = 4.95e-5, B0 = 0.08, Mpivot = 
         
     # Filtering/detection was performed with a fixed fiducial cosmology... so we don't need to recalculate Q
     # We just need to recalculate theta500Arcmin and E(z) only
-    M500=np.power(10, log10M500)
-    theta500Arcmin=calcTheta500Arcmin(z, M500, cosmoModel)
-    Q=calcQ(theta500Arcmin, tckQFit)
+    M500 = np.power(10, log10M500)
+    theta500Arcmin = calcTheta500Arcmin(z, M500, cosmoModel)
+    Q = calcQ(theta500Arcmin, tckQFit)
     
-    # Relativistic correction: now a little more complicated, to account for fact y0~ maps are weighted sum
-    # of individual frequency maps, and relativistic correction size varies with frequency
-    if applyRelativisticCorrection == True:
-        fRels=[]
-        freqWeights=[]
-        for obsFreqGHz in fRelWeightsDict.keys():
-            fRels.append(calcFRel(z, M500, cosmoModel, obsFreqGHz = obsFreqGHz))
-            freqWeights.append(fRelWeightsDict[obsFreqGHz])
-        fRel=np.average(np.array(fRels), axis = 0, weights = freqWeights)
-    else:
-        fRel=1.0
+    fRel = 1.0
     
     # UPP relation according to H13
     # NOTE: m in H13 is M/Mpivot
     # NOTE: this goes negative for crazy masses where the Q polynomial fit goes -ve, so ignore those
-    y0pred=tenToA0*np.power(cosmoModel.efunc(z), 2)*np.power(M500/Mpivot, 1+B0)*Q*fRel
+    
+    y0pred = tenToA0*np.power(cosmoModel.efunc(z), 2)*np.power(M500/Mpivot, 1+B0)*Q*fRel
     
     return y0pred, theta500Arcmin, Q
             
@@ -1455,12 +1434,6 @@ def calcPMass(y0, y0Err, z, zErr, QFit, mockSurvey, tenToA0 = 4.95e-5, B0 = 0.08
 #------------------------------------------------------------------------------------------------------------
 # Mass conversion routines
 
-# For getting x(f) - see Hu & Kravtsov
-x=np.linspace(1e-3, 10, 1000)
-fx=(x**3)*(np.log(1+1./x)-np.power(1+x, -1))
-XF_TCK=interpolate.splrep(fx, x)
-FX_TCK=interpolate.splrep(x, fx)
-
 #------------------------------------------------------------------------------------------------------------
 def gz(zIn, zMax = 1000, dz = 0.1):
     """Calculates linear growth factor at redshift z. Use Dz if you want normalised to D(z) = 1.0 at z = 0.
@@ -1469,21 +1442,14 @@ def gz(zIn, zMax = 1000, dz = 0.1):
     
     """
     
-    zRange=np.arange(zIn, zMax, dz)
-    HzPrime=[]
-    for zPrime in zRange:
-        HzPrime.append(astCalc.Ez(zPrime)*astCalc.H0)
-    HzPrime=np.array(HzPrime)
-    gz=astCalc.Ez(zIn)*np.trapz((np.gradient(zRange)*(1+zRange)) / np.power(HzPrime, 3), zRange)
-    
-    return gz
+    return 0
 
 #------------------------------------------------------------------------------------------------------------
 def calcDz(zIn):
     """Calculate linear growth factor, normalised to D(z) = 1.0 at z = 0.
     
     """
-    return gz(zIn)/gz(0.0)
+    return 0
 
 #------------------------------------------------------------------------------------------------------------
 def criticalDensity(z):
@@ -1491,11 +1457,7 @@ def criticalDensity(z):
     
     """
     
-    G=4.301e-9  # in MSun-1 km2 s-2 Mpc, see Robotham GAMA groups paper
-    Hz=astCalc.H0*astCalc.Ez(z)
-    rho_crit=((3*np.power(Hz, 2))/(8*np.pi*G))
-    
-    return rho_crit
+    return 0
 
 #------------------------------------------------------------------------------------------------------------
 def meanDensity(z):
@@ -1503,53 +1465,25 @@ def meanDensity(z):
     
     """
     
-    rho_mean=astCalc.OmegaMz(z)*criticalDensity(z)
     
-    return rho_mean  
+    return 0 
 
 #------------------------------------------------------------------------------------------------------------
 def MDef1ToMDef2(mass, z, MDef1, MDef2, cosmoModel, c_m_relation = 'Bhattacharya13'):
     """Convert some mass at some z defined using MDef1 into a mass defined according to MDef2.
 
-    Args:
-        mass (float): Halo mass in MSun.
-        z (float): Redshift of the halo.
-        MDef1 (`obj`:ccl.halos.MassDef): CCL halo mass definition you want to convert from.
-        MDef2 (`obj`:ccl.halos.MassDef): CCL halo mass definition you want to convert to.
-    ,   c_m_relation ('obj':`str`): Name of the concentration -- mass relation to assume, as understood by CCL.
-
     """
 
-    tolerance=1e-5
-    scaleFactor=3.0
-    ratio=1e6
-    count=0
-    try:
-        trans1To2=ccl.halos.mass_translator(mass_in = MDef1, mass_out = MDef2, concentration = c_m_relation)
-        massX=trans1To2(cosmoModel, mass, 1/(1+z))
-    except:
-        trans2To1=ccl.halos.mass_translator(mass_in = MDef2, mass_out = MDef1, concentration = c_m_relation)
-        while abs(1.0-ratio) > tolerance:
-            testMass=trans2To1(cosmoModel, scaleFactor*mass, 1/(1+z))
-            ratio=mass/testMass
-            scaleFactor=scaleFactor*ratio
-            count=count+1
-            if count > 10:
-                raise Exception("MDef1 -> MDef2 mass conversion didn't converge quickly enough")
-        massX=scaleFactor*mass
-
-    return massX
+    return 0
 
 #------------------------------------------------------------------------------------------------------------
 def M500cToMdef(M500c, z, massDef, cosmoModel, c_m_relation = 'Bhattacharya13'):
     """Convert M500c to some other mass definition.
     
-    massDef (`obj`:ccl.halos.MassDef): CCL halo mass definition
     
     """
 
-    return MDef1ToMDef2(M500c, z, ccl.halos.MassDef(500, "critical"), massDef, cosmoModel,
-                        c_m_relation = c_m_relation)
+    return 0
 
 #------------------------------------------------------------------------------------------------------------
 def convertM200mToM500c(M200m, z):
@@ -1560,24 +1494,7 @@ def convertM200mToM500c(M200m, z):
     
     """
         
-    # c-M relation for full cluster sample
-    Dz=calcDz(z)    # <--- this is the slow part. 3 seconds!
-    nu200m=(1./Dz)*(1.12*np.power(M200m / (5e13 * np.power(astCalc.H0/100., -1)), 0.3)+0.53)
-    c200m=np.power(Dz, 1.15)*9.0*np.power(nu200m, -0.29)
-    
-    rho_crit=criticalDensity(z)
-    rho_mean=meanDensity(z)
-    R200m=np.power((3*M200m)/(4*np.pi*200*rho_mean), 1/3.)
-
-    rs=R200m/c200m
-    
-    f_rsOverR500c=((500*rho_crit) / (200*rho_mean)) * interpolate.splev(1./c200m, FX_TCK)
-    x_rsOverR500c=interpolate.splev(f_rsOverR500c, XF_TCK)
-    R500c=rs/x_rsOverR500c
-
-    M500c=(4/3.0)*np.pi*R500c**3*(500*rho_crit)
-        
-    return M500c, R500c
+    return 0
 
 #------------------------------------------------------------------------------------------------------------
 def convertM500cToM200m(M500c, z):
@@ -1585,18 +1502,4 @@ def convertM500cToM200m(M500c, z):
     
     """
     
-    tolerance=1e-5
-    scaleFactor=3.0
-    ratio=1e6
-    count=0
-    while abs(1.0-ratio) > tolerance:
-        testM500c, testR500c=convertM200mToM500c(scaleFactor*M500c, z)
-        ratio=M500c/testM500c
-        scaleFactor=scaleFactor*ratio
-        count=count+1
-        if count > 10:
-            raise Exception("M500c -> M200m conversion didn't converge quickly enough")
-        
-    M200m=scaleFactor*M500c
-    
-    return M200m
+    return 0

@@ -213,9 +213,9 @@ class MapDict(dict):
 
         if self['units'] == 'Jy/sr':
             if self['obsFreqGHz'] == 148:
-                data=(data/1.072480e+09)*2.726*1e6
+                data=(data/1.072480e+09)*2.7255*1e6
             elif self['obsFreqGHz'] == 219:
-                data=(data/1.318837e+09)*2.726*1e6
+                data=(data/1.318837e+09)*2.7255*1e6
             else:
                 raise Exception("no code added to support conversion to uK from Jy/sr for freq = %.0f GHz" \
                         % (self['obsFreqGHz']))
@@ -663,7 +663,7 @@ def convertToY(mapData, obsFrequencyGHz = 148):
     return mapData
 
 #-------------------------------------------------------------------------------------------------------------
-def convertToDeltaT(mapData, obsFrequencyGHz = 148, TCMBAlpha = 0.0, z = None):
+def convertToDeltaT(mapData, obsFrequencyGHz = 148, TCMBAlpha = 0.0, z = None, T_cmb = 2.7255):
     """Converts an array (e.g., a map) of Compton y parameter values to ΔTemperature (μK) with respect to the
     CMB at the given frequency.
     
@@ -678,8 +678,9 @@ def convertToDeltaT(mapData, obsFrequencyGHz = 148, TCMBAlpha = 0.0, z = None):
         An array of ΔT (μK) values.
     
     """
-    fx=signals.fSZ(obsFrequencyGHz, TCMBAlpha = TCMBAlpha, z = z)
-    mapData=mapData*fx*(signals.TCMB*1e6)   # into uK
+    fx=signals.fSZ(obsFrequencyGHz, TCMBAlpha = TCMBAlpha, z = z, T_cmb = T_cmb)
+    mapData=mapData*fx*(T_cmb*1e6)   # into uK
+    
     #mapData=mapData*-5.3487e6   # BB into uK from websky at 278. (see our overleaf.) 
     #BB: freq: 27, 39, 93, 145, 225, 278 GHz
     #BB: conv: -5.3487e6, -5.2384e6, -4.2840e6, -2.7685e6, 3.1517e5, 2.7314e6    
@@ -1240,7 +1241,8 @@ def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None):
 
     # Power spectrum array ps here is indexed by ell, starting from 0
     # i.e., each element corresponds to the power at ell = 0, 1, 2 ... etc.
-    ps=powspec.read_spectrum(nemo.__path__[0]+os.path.sep+"data"+os.path.sep+"planck_lensedCls.dat",
+    ## BB: modified
+    ps=powspec.read_spectrum("/mnt/home/bbolliet/ceph/tsz_likelihood/nemo-1/nemo/data/planck_lensedCls.dat",
                              scale = True, expand = None)
     ps=ps[0]
     lps=np.arange(0, len(ps))
@@ -1729,9 +1731,19 @@ def estimateContamination(contamSimDict, imageDict, SNRKeys, label, diagnosticsD
     return contaminTabDict
 
 #------------------------------------------------------------------------------------------------------------
-def makeModelImage(shape, wcs, catalog, beamFileName, obsFreqGHz = None, GNFWParams = 'default',\
-                   profile = 'A10', cosmoModel = None, applyPixelWindow = True, override = None,\
-                   validAreaSection = None, minSNR = -99, TCMBAlpha = 0):
+def makeModelImage(shape, 
+                   wcs, 
+                   catalog, 
+                   beamFileName, 
+                   obsFreqGHz = None, 
+                   GNFWParams = 'default',\
+                   profile = 'A10', 
+                   cosmoModel = None, 
+                   applyPixelWindow = True, 
+                   override = None,\
+                   validAreaSection = None, 
+                   minSNR = -99, 
+                   TCMBAlpha = 0):
     """Make a map with the given dimensions (shape) and WCS, containing model clusters or point sources, 
     with properties as listed in the catalog. This can be used to either inject or subtract sources
     from real maps.
@@ -1782,12 +1794,19 @@ def makeModelImage(shape, wcs, catalog, beamFileName, obsFreqGHz = None, GNFWPar
     
     # Optional SNR cuts
     if 'SNR' in catalog.keys():
+        
         SNRKey='SNR'
+        
     elif 'fixed_SNR' in catalog.keys():
+        
         SNRKey='fixed_SNR'
+        
     else:
+        
         SNRKey=None
+        
     if SNRKey is not None:
+        
         catalog=catalog[catalog[SNRKey] > minSNR]
 
     # If we want to restrict painting to just area mask within in a tile
@@ -1803,14 +1822,18 @@ def makeModelImage(shape, wcs, catalog, beamFileName, obsFreqGHz = None, GNFWPar
         catalog=catalog[cMask]
 
     if len(catalog) == 0:
+        
         return None
 
     if cosmoModel is None:
+        
         cosmoModel=signals.fiducialCosmoModel
 
     # Set initial max size in degrees from beam file (used for sources; clusters adjusted for each object)
     numFWHM=5.0
+    
     beam=signals.BeamProfile(beamFileName = beamFileName)
+    
     maxSizeDeg=(beam.FWHMArcmin*numFWHM)/60
     
     # Map of distance(s) from objects - this will get updated in place (fast)
@@ -1820,75 +1843,75 @@ def makeModelImage(shape, wcs, catalog, beamFileName, obsFreqGHz = None, GNFWPar
         # Clusters - insert one at a time (with different scales etc.)
         # We could use this to replace how GNFWParams are fed in also (easier for nemoModel script)
         if profile == 'A10':
+            
             makeClusterSignalMap=signals.makeArnaudModelSignalMap
+        
         elif profile == 'B12':
+            
             makeClusterSignalMap=signals.makeBattagliaModelSignalMap
+            
         else:
+            
             raise Exception("Didn't understand profile - should be A10 or B12. This would be an excellent place\
                             to accept a string of GNFW parameters, but that is not implemented yet.")
         count=0
-        # First bit here (override) is for doing injection sims faster
-        if override is not None:
-            z=override['redshift']
-            M500=override['M500']
-            y0ToInsert=catalog['y_c'].data*1e-4
-            RAs=catalog['RADeg'].data
-            decs=catalog['decDeg'].data
-            theta500Arcmin=signals.calcTheta500Arcmin(z, M500, cosmoModel)
-            maxSizeDeg=5*(theta500Arcmin/60)
-            modelMap=makeClusterSignalMap(z, M500, modelMap.shape, wcs, RADeg = RAs,
-                                          decDeg = decs, beam = beam,
-                                          GNFWParams = GNFWParams, amplitude = y0ToInsert,
-                                          maxSizeDeg = maxSizeDeg, convolveWithBeam = True,
-                                          cosmoModel = cosmoModel)
-            ## BB coment 2 lines below: we want sz map only.
-            #if obsFreqGHz is not None:
-            #    modelMap=convertToDeltaT(modelMap, obsFrequencyGHz = obsFreqGHz,
-            #                             TCMBAlpha = TCMBAlpha, z = z)
-        else:
-            for row in catalog:
-                count=count+1
-                if 'true_M500c' in catalog.keys():
-                    # This case is for when we're running from nemoMock output
-                    # Since the idea of this is to create noise-free model images, we must use true values here
-                    # (to avoid any extra scatter/selection effects after adding model clusters to noise maps).
-                    M500=row['true_M500c']*1e14
-                    z=row['redshift']
-                    y0ToInsert=row['true_y_c']*1e-4
-                else:
-                    # NOTE: This case is for running from nemo output
-                    # We need to adapt this for when the template names are not in this format
-                    if 'template' not in catalog.keys():
-                        raise Exception("No M500, z, or template column found in catalog.")
-                    bits=row['template'].split("#")[0].split("_")
-                    M500=float(bits[1][1:].replace("p", "."))
-                    z=float(bits[2][1:].replace("p", "."))
-                    y0ToInsert=row['y_c']*1e-4  # or fixed_y_c...
-                theta500Arcmin=signals.calcTheta500Arcmin(z, M500, cosmoModel)
-                maxSizeDeg=5*(theta500Arcmin/60)
-                signalMap=makeClusterSignalMap(z, M500, modelMap.shape, wcs, RADeg = row['RADeg'],
-                                                decDeg = row['decDeg'], beam = beam,
-                                                GNFWParams = GNFWParams, amplitude = y0ToInsert,
-                                                maxSizeDeg = maxSizeDeg, convolveWithBeam = True,
-                                                cosmoModel = cosmoModel)
-                ## BB coment 2 lines below: we want sz map only.
-                #if obsFreqGHz is not None:
-                #    signalMap=convertToDeltaT(signalMap, obsFrequencyGHz = obsFreqGHz,
-                #                                TCMBAlpha = TCMBAlpha, z = z)
-                modelMap=modelMap+signalMap
-    else:
-        # Sources - slower but more accurate way
+
+
         for row in catalog:
-            if validAreaSection is not None:
-                x0, x1, y0, y1=validAreaSection
-                x, y=wcs.wcs2pix(row['RADeg'], row['decDeg'])
-                if (x >= x0 and x < x1 and y >= y0 and y < y1) == False:
-                    continue
-            degreesMap=np.ones(modelMap.shape, dtype = float)*1e6 # NOTE: never move this
-            degreesMap, xBounds, yBounds=makeDegreesDistanceMap(degreesMap, wcs,
-                                                                row['RADeg'], row['decDeg'],
-                                                                maxSizeDeg)
-            signalMap=signals.makeBeamModelSignalMap(degreesMap, wcs, beam)*row['deltaT_c']
+            count=count+1
+
+            # This case is for when we're running from nemoMock output
+            # Since the idea of this is to create noise-free model images, we must use true values here
+            # (to avoid any extra scatter/selection effects after adding model clusters to noise maps).
+            
+            ## B: making the simulated maps. 
+            if 'redshift' in catalog.keys():
+            
+                z=row['redshift']
+                
+                y0ToInsert=row['true_y_c']*1e-4
+            
+                ## BB: compute M500 here
+                m200c = row['true_M200c']*1e14*cosmoModel.h()# in msun/h
+                m500c = cosmoModel.get_m200c_to_m500c_at_z_and_M(z,m200c) # in msun/h
+                M500 = m500c/cosmoModel.h() # in msun
+                
+            else:
+                
+                ## BB: cluster finder: 
+                if 'template' not in catalog.keys():
+                    
+                    raise Exception("No M500, z, or template column found in catalog.")
+                    
+                bits = row['template'].split("#")[0].split("_")
+                
+                M500 = float(bits[1][1:].replace("p", "."))
+                
+                z = float(bits[2][1:].replace("p", "."))
+                
+                y0ToInsert = row['y_c']*1e-4
+                
+
+            theta500Arcmin = signals.calcTheta500Arcmin(z, M500, cosmoModel)
+
+            maxSizeDeg=5*(theta500Arcmin/60)
+
+            signalMap=makeClusterSignalMap(z, 
+                                           M500, 
+                                           modelMap.shape, 
+                                           wcs, 
+                                           RADeg = row['RADeg'],
+                                           decDeg = row['decDeg'], 
+                                           beam = beam,
+                                           GNFWParams = GNFWParams, 
+                                           amplitude = y0ToInsert,
+                                           maxSizeDeg = maxSizeDeg, 
+                                           convolveWithBeam = True,
+                                           cosmoModel = cosmoModel)
+            ## BB coment 2 lines below: we want sz map only.
+            if obsFreqGHz is not None:
+               signalMap=convertToDeltaT(signalMap, obsFrequencyGHz = obsFreqGHz,
+                                           TCMBAlpha = TCMBAlpha, z = z, T_cmb = cosmoModel.T_cmb())
             modelMap=modelMap+signalMap
 
     # Optional: apply pixel window function - generally this should be True

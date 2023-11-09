@@ -338,7 +338,7 @@ def measureFluxes(catalog, filteredMapDict, diagnosticsDir, photFilteredMapDict 
                 yc=mapValue
                 obj[prefix+'y_c']=yc/1e-4                            # So that same units as H13 in output catalogs
                 obj[prefix+'err_y_c']=obj[prefix+'y_c']/obj[prefix+'SNR']
-                deltaTc=maps.convertToDeltaT(yc, obsFrequencyGHz = ycObsFreqGHz)
+                deltaTc=maps.convertToDeltaT(yc, obsFrequencyGHz = ycObsFreqGHz, T_cmb = filteredMapDict['T_cmb'])
                 obj[prefix+'deltaT_c']=deltaTc
                 obj[prefix+'err_deltaT_c']=abs(deltaTc/obj[prefix+'SNR'])
             elif mapUnits == 'uK':
@@ -347,8 +347,8 @@ def measureFluxes(catalog, filteredMapDict, diagnosticsDir, photFilteredMapDict 
                 obj[prefix+'deltaT_c']=deltaTc
                 obj[prefix+'err_deltaT_c']=deltaTc/obj[prefix+'SNR']                        
                 if reportJyFluxes == True:
-                    obj[prefix+"fluxJy"]=deltaTToJyPerSr(obj[prefix+'deltaT_c'], obsFreqGHz)*beamSolidAngle_nsr*1.e-9
-                    obj[prefix+"err_fluxJy"]=deltaTToJyPerSr(obj[prefix+'err_deltaT_c'], obsFreqGHz)*beamSolidAngle_nsr*1.e-9
+                    obj[prefix+"fluxJy"]=deltaTToJyPerSr(obj[prefix+'deltaT_c'], obsFreqGHz, T_cmb = filteredMapDict['T_cmb'])*beamSolidAngle_nsr*1.e-9
+                    obj[prefix+"err_fluxJy"]=deltaTToJyPerSr(obj[prefix+'err_deltaT_c'], obsFreqGHz, T_cmb = filteredMapDict['T_cmb'])*beamSolidAngle_nsr*1.e-9
 
 #------------------------------------------------------------------------------------------------------------
 def makeForcedPhotometryCatalog(filteredMapDict, inputCatalog, useInterpolator = True,\
@@ -457,7 +457,7 @@ def addFreqWeightsToCatalog(imageDict, photFilter, diagnosticsDir):
                         row['fixed_y_c_weight_%sGHz' % (freqStr)]=freqWeights[i]
 
 #------------------------------------------------------------------------------------------------------------
-def deltaTToJyPerSr(temp, obsFreqGHz):
+def deltaTToJyPerSr(temp, obsFreqGHz, T_cmb = 2.7255):
     """Convert delta T (uK) to Jy/sr at the given frequency in GHz
     
     """
@@ -466,7 +466,7 @@ def deltaTToJyPerSr(temp, obsFreqGHz):
     h=constants.h.cgs.value
     c=constants.c.cgs.value
     nu=obsFreqGHz*1.e9
-    T0=signals.TCMB
+    T0=T_cmb
     x=h*nu/(kB*T0)
     cNu=2*(kB*T0)**3/(h**2*c**2)*x**4/(4*(np.sinh(x/2.))**2)
     cNu*=1e23
@@ -474,7 +474,7 @@ def deltaTToJyPerSr(temp, obsFreqGHz):
     return temp*cNu*1e-6/T0
 
 #------------------------------------------------------------------------------------------------------------
-def JyPerSrToDeltaT(JySr, obsFreqGHz):
+def JyPerSrToDeltaT(JySr, obsFreqGHz, T_cmb = 2.7255):
     """Convert Jy/sr to delta T (uK) at the given frequency in GHz
     
     """
@@ -483,7 +483,7 @@ def JyPerSrToDeltaT(JySr, obsFreqGHz):
     h=constants.h.cgs.value
     c=constants.c.cgs.value
     nu=obsFreqGHz*1.e9
-    T0=signals.TCMB
+    T0=T_cmb
     x=h*nu/(kB*T0)
     cNu=2*(kB*T0)**3/(h**2*c**2)*x**4/(4*(np.sinh(x/2.))**2)
     cNu*=1e23

@@ -10,9 +10,9 @@ import sys
 #print("Running under python: %s" % (sys.version))
 import os
 import datetime, time
+import nemo 
 from nemo import *
-import nemo
-from nemo import MockSurvey
+# from nemo import startUp, maps, catalogs, signals, completeness, pipelines
 import argparse
 import astropy
 import astropy.table as atpy
@@ -22,6 +22,7 @@ import numpy as np
 import pylab
 import pickle
 import types
+from classy_sz import Class
 import yaml
 #import IPython
 pylab.matplotlib.interactive(False)
@@ -30,6 +31,10 @@ pylab.matplotlib.interactive(False)
 def makeParser():
     parser=argparse.ArgumentParser("nemo")
     parser.add_argument("configFileName", help="A .yml configuration file.")
+
+    ## this is used in Q_fit or to compute Tcmb, radial pressure profiles for filters etc 
+    parser.add_argument("astrocosmo_configFileName", help="A .yml configuration file specifying fiducial cosmology/astrophysics.") 
+
     parser.add_argument("-S", "--calc-selection-function", dest="calcSelFn", action="store_true",
                         help="Calculate the completeness in terms of cluster mass, assuming the scaling\
                         relation parameters given in the .yml config file. Output will be written under the\
@@ -70,13 +75,19 @@ if __name__ == '__main__':
         strictMPIExceptions=True
     
     parDictFileName=args.configFileName
-    config=startUp.NemoConfig(parDictFileName, calcSelFn = args.calcSelFn,
-                              sourceInjectionTest = args.sourceInjectionTest, MPIEnabled = args.MPIEnabled,
-                              strictMPIExceptions = strictMPIExceptions, writeTileInfo = True)
-    if args.tilingCheck == True:
-        print(">>> Tiling check:")
-        print("... This config has %d tiles." % (len(config.allTileNames)))
-        sys.exit()
+    
+
+    
+    config= startUp.NemoConfig(parDictFileName, 
+                              calcSelFn = args.calcSelFn,
+                              sourceInjectionTest = args.sourceInjectionTest, 
+                              MPIEnabled = args.MPIEnabled,
+                              strictMPIExceptions = strictMPIExceptions, 
+                              writeTileInfo = True)
+    
+
+    print(">>> Tiling check:")
+    print("... This config has %d tiles." % (len(config.allTileNames)))
 
     config.parDict['forcedPhotometryCatalog']=args.forcedCatalogFileName
     if config.parDict['forcedPhotometryCatalog'] is not None:
@@ -86,10 +97,47 @@ if __name__ == '__main__':
     else:
         optimalCatalogFileName=config.rootOutDir+os.path.sep+"%s_optimalCatalog.csv" % (os.path.split(config.rootOutDir)[-1])
 
+
+    ## BB: compute the cosmological model with class_sz  # useful for distance/mass_conversion/etc. 
+    ## no need to compute hmf 
+    print(">> computing cosmology with class_sz") 
+    
+    astrocosmo_configFileName = args.astrocosmo_configFileName
+    
+    with open(astrocosmo_configFileName, "r") as stream:
+        astrocosmo_config = yaml.safe_load(stream)
+        
+    class_sz_common_settings = astrocosmo_config['class_sz']['class_sz_common_settings']
+    class_sz_cosmo_params = {
+    'Omega_b': astrocosmo_config['Ob0'],
+    'Omega_cdm':  astrocosmo_config['Om0']-astrocosmo_config['Ob0'],
+    'H0': astrocosmo_config['H0'],
+    'sigma8': astrocosmo_config['sigma8'],
+    'n_s': astrocosmo_config['ns'],
+    }  
+    class_sz_ym_params = {
+    'A_ym'  : astrocosmo_config['tenToA0'],
+    'B_ym'  : astrocosmo_config['B0'],
+    'C_ym' : 0.,
+    'sigmaM_ym' : astrocosmo_config['sigma_int'],
+    'm_pivot_ym_[Msun]' : astrocosmo_config['Mpivot'],   
+    }
+    cosmoModel = Class()
+    cosmoModel.set(class_sz_common_settings)
+    cosmoModel.set(class_sz_cosmo_params)
+    cosmoModel.set(class_sz_ym_params)
+
+    cosmoModel.compute_class_szfast()
+    
+    print(">> class_sz computed") 
+
     if os.path.exists(optimalCatalogFileName) == False:
-        optimalCatalog=pipelines.filterMapsAndMakeCatalogs(config, writeAreaMask = True, writeFlagMask = True)
+        optimalCatalog = pipelines.filterMapsAndMakeCatalogs(config, 
+                                                             writeAreaMask = True, 
+                                                             writeFlagMask = True,
+                                                             cosmoModel = cosmoModel)
         if config.rank == 0:
-            optimalCatalog=catalogs.flagTileBoundarySplits(optimalCatalog)
+            optimalCatalog = catalogs.flagTileBoundarySplits(optimalCatalog)
             optimalCatalog.sort('name')
             catalogs.writeCatalog(optimalCatalog, optimalCatalogFileName)
             catalogs.writeCatalog(optimalCatalog, optimalCatalogFileName.replace(".csv", ".fits"))
@@ -101,10 +149,13 @@ if __name__ == '__main__':
                 
     # Q function (filter mismatch) - if needed options have been given
     if 'photFilter' in config.parDict.keys() and config.parDict['photFilter'] is not None and config.parDict['fitQ'] == True:
+        
         if os.path.exists(config.selFnDir+os.path.sep+"QFit.fits") == False:
-            signals.fitQ(config)
+            
+            signals.fitQ(config, cosmoModel = cosmoModel)
 
     # Generates the noise versus area tables, and adds 'footprint_label' columns to output catalogs
+    # BB: this is also where the optimal catalog is saved
     pipelines.makeRMSTables(config)
 
     # Source injection test - one way to calculate completeness ; needed for position recovery tests
@@ -114,7 +165,8 @@ if __name__ == '__main__':
         if 'sourceInjectionTest' in config.parDict.keys() and config.parDict['sourceInjectionTest'] == True:
             if config.MPIEnabled == True:
                 config.comm.barrier()   # Otherwise, some processes can begin before catalog written to disk and then crash
-            sourceInjTable=maps.sourceInjectionTest(config)
+                
+            sourceInjTable = maps.sourceInjectionTest(config)
     else:
         if config.rank == 0:
             print("... already made source injection data %s" % (sourceInjPath))
@@ -125,31 +177,21 @@ if __name__ == '__main__':
 
         # Stitch together map tiles - full fat versions (this will only work if 'saveFilteredMaps: True')
         if 'stitchTiles' in config.parDict.keys() and config.parDict['stitchTiles'] == True:
+            
             maps.stitchTiles(config)
 
         # Plot tile-averaged position recovery test
         if sourceInjTable is not None:
             sourceInjTable.meta['NEMOVER']=nemo.__version__
             sourceInjTable.write(config.selFnDir+os.path.sep+"sourceInjectionData.fits", overwrite = True)
+            
             maps.positionRecoveryAnalysis(sourceInjTable, config.diagnosticsDir+os.path.sep+"positionRecovery.pdf",
                                           percentiles = [50, 95, 99.7], plotRawData = True,
                                           pickleFileName = config.diagnosticsDir+os.path.sep+'positionRecovery.pkl',
                                           selFnDir = config.selFnDir)
 
-        ## Plot contamination together
-        #if conTabDict != {}:
-            #maps.plotContamination(conTabDict, config.diagnosticsDir)
-
-        # Cache file containing weights for relativistic corrections
-        # Saves doing this later (e.g., when nemoMass or nemoSelFn run) and it's quick to do
-        signals.getFRelWeights(config)
 
         # Tidy up by making MEF files and deleting the (potentially 100s) of per-tile files made
         completeness.tidyUp(config)
 
-        # Now do all completeness calculations, output etc. using a SelFn object
-        if 'calcSelFn' in list(config.parDict.keys()) and config.parDict['calcSelFn'] == True:
-            completeness.completenessByFootprint(config)
-            if 'massLimitMaps' in config.parDict['selFnOptions'].keys():
-                completeness.makeMassLimitMapsAndPlots(config)
 
