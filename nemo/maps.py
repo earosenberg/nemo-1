@@ -1219,7 +1219,7 @@ def addWhiteNoise(mapData, noisePerPix):
     return mapData
 
 #------------------------------------------------------------------------------------------------------------
-def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None):
+def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None, psfile = None):
     """Generate a simulated CMB map, optionally convolved with the beam and with (white) noise added.
     
     Args:
@@ -1233,7 +1233,8 @@ def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None):
             the beam with which the map will be convolved, or a :obj:`signals.BeamProfile` object. If None,
             no beam convolution is applied.
         seed (:obj:`int`): The seed used for the random CMB realisation.
-            
+        psfile (:obj: `str`): Path to CMB power spectrum file. Should be txt file giving Cls in 5 cols: l, TT, EE, BB, TE.
+
     Returns:
         A map (:obj:`numpy.ndarray`)
     
@@ -1241,9 +1242,9 @@ def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None):
 
     # Power spectrum array ps here is indexed by ell, starting from 0
     # i.e., each element corresponds to the power at ell = 0, 1, 2 ... etc.
-    ## BB: modified
-    ps=powspec.read_spectrum("/mnt/home/bbolliet/ceph/tsz_likelihood/nemo-1/nemo/data/planck_lensedCls.dat",
-                             scale = True, expand = None)
+    if psfile is None:
+        psfile = nemo.__path__[0]+os.path.sep+"data"+os.path.sep+"planck_lensedCls.dat" # Default power spectrum
+    ps=powspec.read_spectrum(psfile, scale = True, expand = None)
     ps=ps[0]
     lps=np.arange(0, len(ps))
 
@@ -1264,7 +1265,7 @@ def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None):
     return randMap
 
 #-------------------------------------------------------------------------------------------------------------
-def simNoiseMap(shape, noiseLevel, wcs = None, lKnee = None, alpha = -3, noiseMode = 'perPixel'):
+def simNoiseMap(shape, noiseLevel, wcs = None, lKnee = None, alpha = -3, noiseMode = 'perPixel', seed=None):
     """Generate a simulated noise map. This may contain just white noise, or optionally a 1/f noise component
     can be generated.
 
@@ -1286,7 +1287,7 @@ def simNoiseMap(shape, noiseLevel, wcs = None, lKnee = None, alpha = -3, noiseMo
 
     """
 
-    np.random.seed()
+    np.random.seed(seed)
 
     assert(noiseMode in ['perPixel', 'perSquareArcmin'])
     if noiseMode == 'perSquareArcmin' and lKnee is not None:
@@ -1349,6 +1350,7 @@ def simNoiseMap(shape, noiseLevel, wcs = None, lKnee = None, alpha = -3, noiseMo
         randMap = _mod_noise_map(ivarMap, Nl_atm)
         assert np.all(np.isfinite(randMap))
 
+    np.random.seed()
     return randMap
 
 #-------------------------------------------------------------------------------------------------------------
