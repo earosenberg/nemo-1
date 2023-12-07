@@ -1253,7 +1253,7 @@ def simCMBMap(shape, wcs, noiseLevel = None, beam = None, seed = None, psfile = 
             beam=signals.BeamProfile(beamFileName = beam)
         assert(type(beam) == signals.BeamProfile)
         lbeam=np.interp(lps, beam.ell, beam.Bell)
-        ps*=lbeam
+        ps*=lbeam**2
 
     randMap=curvedsky.rand_map(shape, wcs.AWCS, ps = ps, spin = [0,2], seed = seed)
 
